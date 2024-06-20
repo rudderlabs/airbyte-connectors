@@ -15,10 +15,30 @@
       "type": "string"
     },
     "html_url": {
-      "type": "string"
+      "type": ["null", "string"]
     },
     "created_at": {
       "type": "string"
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "self": {
+          "type": "string"
+        },
+        "html_url": {
+          "type": "string"
+        }
+      }
     },
     "incident": {
       "type": "object",

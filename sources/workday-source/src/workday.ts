@@ -11,8 +11,6 @@ import {
 } from './types';
 
 const DEFAULT_PAGE_LIMIT = 20;
-const DEFAULT_BASE_URL = 'https://wd2-impl-services1.workday.com/ccx/';
-const VERSION_PLACEHOLDER = '<VERSION>';
 
 export interface Page<T> {
   data: ReadonlyArray<T>;
@@ -26,13 +24,16 @@ export interface Page<T> {
  *  1. https://github.com/Workday/workday-prism-analytics-data-loader
  *  2. https://github.com/Workday/prism-python
  *  3. https://community.workday.com/sites/default/files/file-hosting/restapi/
+ *  4. https://github.com/Workday/raas-python
  */
 export class Workday {
   constructor(
     private readonly logger: AirbyteLogger,
     private readonly api: AxiosInstance,
     private readonly limit: number,
-    private readonly apiBaseUrlTemplate: string
+    private readonly baseUrl: string,
+    private readonly tenant: string,
+    private readonly skipConnectionCheck: boolean
   ) {}
 
   static async instance(
@@ -42,62 +43,75 @@ export class Workday {
     if (!cfg.tenant) {
       throw new VError('tenant must not be an empty string');
     }
-    if (!cfg.clientId) {
-      throw new VError('clientId must not be an empty string');
+    if (!cfg.credentials) {
+      throw new VError('credentials must not be empty');
     }
-    if (!cfg.clientSecret) {
-      throw new VError('clientSecret must not be an empty string');
-    }
-    if (!cfg.refreshToken) {
-      throw new VError('refreshToken must not be an empty string');
+    if (!cfg.baseUrl) {
+      throw new VError('baseUrl must not be an empty string');
     }
 
-    const baseURL = new URL(cfg.baseUrl ?? DEFAULT_BASE_URL);
-    const apiBaseUrlTemplate =
-      baseURL.toString() + `/api/${VERSION_PLACEHOLDER}/${cfg.tenant}`;
-    logger.debug('Assuming API base url template: %s', apiBaseUrlTemplate);
+    const timeout = cfg.timeout ?? 60000;
+    const headers = {'content-type': 'application/json'};
 
-    const accessToken = await Workday.getAccessToken(baseURL, cfg, logger);
+    if (
+      'refresh_token' in cfg.credentials &&
+      'clientId' in cfg.credentials &&
+      'clientSecret' in cfg.credentials
+    ) {
+      const res = await Workday.getAccessToken(cfg.baseUrl, cfg, logger);
+      headers['authorization'] = `Bearer ${res.access_token}`;
+    } else if ('password' in cfg.credentials && 'username' in cfg.credentials) {
+      const usernamePass = `${cfg.credentials.username}:${cfg.credentials.password}`;
+      const basic = Buffer.from(usernamePass).toString('base64');
+      headers['authorization'] = `Basic ${basic}`;
+    } else {
+      throw new VError(
+        'Invalid credentials! Either (refreshToken, clientId, clientSecret) OR (username, password) must be provided'
+      );
+    }
     const api = axios.create({
-      timeout: 30000, // default is `0` (no timeout)
-      maxContentLength: 10000000, //default is 2000 bytes,
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-      },
+      timeout, // default is `0` (no timeout)
+      maxContentLength: Infinity, //default is 2000 bytes,
+      maxBodyLength: Infinity, //default is 2000 bytes,
+      headers,
     });
 
     return new Workday(
       logger,
       api,
       cfg.limit ?? DEFAULT_PAGE_LIMIT,
-      apiBaseUrlTemplate
+      cfg.baseUrl,
+      cfg.tenant,
+      cfg.skipConnectionCheck ? cfg.skipConnectionCheck : true
     );
   }
 
   private static async getAccessToken(
-    baseURL: URL,
-    cfg: WorkdayConfig,
+    baseURL: string,
+    cfg: any,
     logger: AirbyteLogger
-  ): Promise<string> {
-    const authUrl = baseURL.toString() + `/oauth2/${cfg.tenant}/token`;
-    logger.debug('Requesting an access token from: %s', authUrl);
-
+  ): Promise<{
+    refresh_token: string;
+    token_type: string;
+    access_token: string;
+  }> {
+    const authUrl = ccxUrl(`/oauth2/${cfg.tenant}/token`, baseURL).toString();
+    logger.debug('Requesting an access token - %s', authUrl);
     const data = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: cfg.refreshToken,
-      client_id: cfg.clientId,
-      client_secret: cfg.clientSecret,
+      refresh_token: cfg.credentials.refreshToken,
+      client_id: cfg.credentials.clientId,
+      client_secret: cfg.credentials.clientSecret,
     });
     const res = await axios.post(authUrl, data.toString(), {
       headers: {'content-type': 'application/x-www-form-urlencoded'},
     });
-    // Expecting data of type: {refresh_token, token_type, access_token}
-    return res.data.access_token;
+    return res.data;
   }
 
   private apiBaseUrl(version: string): string {
-    return this.apiBaseUrlTemplate.replace(VERSION_PLACEHOLDER, version);
+    const apiBaseUrl = ccxUrl(`/api/${version}/${this.tenant}`, this.baseUrl);
+    return apiBaseUrl.toString();
   }
 
   async checkConnection(): Promise<void> {
@@ -141,6 +155,22 @@ export class Workday {
         params: {limit, offset},
       })
     );
+  }
+
+  async *customReports(customReportName: string): AsyncGenerator<any> {
+    const finalPathURL = ccxUrl(
+      `/service/customreport2/${this.tenant}/${customReportName}`,
+      this.baseUrl
+    );
+    const finalPath = finalPathURL.toString();
+    this.logger.info(
+      `Fetching Custom Report '${customReportName}' from - ${finalPath}`
+    );
+
+    const res = await this.api.get(finalPath, {params: {format: 'json'}});
+    for (const item of res.data?.Report_Entry ?? []) {
+      yield item;
+    }
   }
 
   async *orgCharts(
@@ -189,4 +219,9 @@ export class Workday {
       }
     } while (offset < total && pages < maxPages);
   }
+}
+
+export function ccxUrl(postCxxPath: string, baseUrl: string): string {
+  const url = new URL('/ccx' + postCxxPath, baseUrl);
+  return url.toString();
 }

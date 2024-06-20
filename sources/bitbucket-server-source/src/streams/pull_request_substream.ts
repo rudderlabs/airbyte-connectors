@@ -4,7 +4,7 @@ import {Dictionary} from 'ts-essentials';
 import {StreamBase} from './common';
 
 export type StreamSlice = {
-  project: string;
+  projectKey: string;
   repo: {slug: string; fullName: string};
 };
 
@@ -25,13 +25,14 @@ export abstract class PullRequestSubStream extends StreamBase {
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const project of this.config.projects) {
+    for await (const project of this.projects()) {
+      const projectKey = await this.fetchProjectKey(project.key);
       for (const repo of await this.server.repositories(
-        project,
-        this.config.repositories
+        projectKey,
+        this.projectRepoFilter
       )) {
         yield {
-          project,
+          projectKey,
           repo: {slug: repo.slug, fullName: repo.computedProperties.fullName},
         };
       }

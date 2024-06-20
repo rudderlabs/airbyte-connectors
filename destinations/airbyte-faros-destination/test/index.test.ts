@@ -2,7 +2,6 @@ import {
   AirbyteConfig,
   AirbyteConnectionStatus,
   AirbyteConnectionStatusMessage,
-  AirbyteLogger,
   AirbyteSpec,
 } from 'faros-airbyte-cdk';
 import {getLocal} from 'mockttp';
@@ -10,6 +9,7 @@ import os from 'os';
 
 import {Edition, FarosDestinationRunner, InvalidRecordStrategy} from '../src';
 import {FarosDestination} from '../src/destination';
+import {FarosDestinationLogger} from '../src/destination-logger';
 import {CLI, read} from './cli';
 import {initMockttp, tempConfig} from './testing-tools';
 
@@ -19,7 +19,7 @@ describe('index', () => {
 
   beforeEach(async () => {
     await initMockttp(mockttp);
-    configPath = await tempConfig(mockttp.url);
+    configPath = await tempConfig({api_url: mockttp.url});
   });
 
   afterEach(async () => {
@@ -35,15 +35,8 @@ describe('index', () => {
 
   test('spec', async () => {
     const cli = await CLI.runWith(['spec']);
-    const maxCheckLength = 16384;
-    const expectedSpec =
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      JSON.stringify(new AirbyteSpec(require('../resources/spec.json'))) +
-      os.EOL;
+    expect(await read(cli.stdout)).toMatchSnapshot();
     expect(await read(cli.stderr)).toBe('');
-    expect((await read(cli.stdout)).substring(0, maxCheckLength)).toBe(
-      expectedSpec.substring(0, maxCheckLength)
-    );
     expect(await cli.wait()).toBe(0);
   });
 
@@ -62,11 +55,11 @@ describe('index', () => {
   });
 
   test('check community edition config', async () => {
-    const configPath = await tempConfig(
-      mockttp.url,
-      InvalidRecordStrategy.SKIP,
-      Edition.COMMUNITY
-    );
+    const configPath = await tempConfig({
+      api_url: mockttp.url,
+      invalid_record_strategy: InvalidRecordStrategy.SKIP,
+      edition: Edition.COMMUNITY,
+    });
     const cli = await CLI.runWith(['check', '--config', configPath]);
 
     expect(await read(cli.stderr)).toBe('');
@@ -81,12 +74,12 @@ describe('index', () => {
   });
 
   test('fail check on invalid segment user id', async () => {
-    const configPath = await tempConfig(
-      mockttp.url,
-      InvalidRecordStrategy.SKIP,
-      Edition.COMMUNITY,
-      {segment_user_id: 'badid'}
-    );
+    const configPath = await tempConfig({
+      api_url: mockttp.url,
+      invalid_record_strategy: InvalidRecordStrategy.SKIP,
+      edition: Edition.COMMUNITY,
+      edition_configs: {segment_user_id: 'badid'},
+    });
     const cli = await CLI.runWith(['check', '--config', configPath]);
 
     expect(await read(cli.stderr)).toBe('');
@@ -97,7 +90,7 @@ describe('index', () => {
   });
 
   test('check for circular converter dependencies', async () => {
-    const dest = new FarosDestination(new AirbyteLogger());
+    const dest = new FarosDestination(new FarosDestinationLogger());
     expect(() =>
       dest.checkForCircularDependencies({
         s1: new Set(['s2', 's3', 's4']),

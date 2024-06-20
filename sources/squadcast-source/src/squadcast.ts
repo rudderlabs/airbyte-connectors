@@ -32,7 +32,6 @@ export interface SquadcastConfig {
   readonly event_deduped?: boolean;
   readonly event_incident_id?: string;
   readonly cutoff_days: number;
-  readonly max_content_length?: number;
 }
 
 interface PaginateResponse<T> {
@@ -67,7 +66,7 @@ export class Squadcast {
     const httpClient = axios.create({
       baseURL: API_URL,
       timeout: 5000, // default is `0` (no timeout)
-      maxContentLength: config.max_content_length ?? 20000, //default is 2000 bytes
+      maxContentLength: Infinity,
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -98,8 +97,6 @@ export class Squadcast {
       config.event_incident_id,
       config.event_deduped
     );
-    logger.debug('Created  instance');
-
     return Squadcast.squadcast;
   }
 
@@ -194,7 +191,7 @@ export class Squadcast {
     params.append('owner_id', ownerID);
 
     if (this.services.length > 0) {
-      for await (const service of this.getServices()) {
+      for (const service of await this.getServices()) {
         params.append('service', service.id);
       }
     }
@@ -278,13 +275,15 @@ export class Squadcast {
   }
 
   @Memoize()
-  async *getServices(): AsyncGenerator<Service> {
+  async getServices(): Promise<ReadonlyArray<Service>> {
     const res = await this.httpClient.get<ServiceResponse>('services');
+    const services = [];
     for (const item of res.data.data) {
       if (this.services.length === 0 || this.services.includes(item.slug)) {
-        yield item;
+        services.push(item);
       }
     }
+    return services;
   }
 
   async *getUsers(): AsyncGenerator<User> {

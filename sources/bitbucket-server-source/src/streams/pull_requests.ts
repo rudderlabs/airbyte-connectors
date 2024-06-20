@@ -5,7 +5,7 @@ import {Dictionary} from 'ts-essentials';
 import {BitbucketServerConfig} from '../bitbucket-server';
 import {StreamBase} from './common';
 
-type StreamSlice = {project: string; repo: {slug: string; fullName: string}};
+type StreamSlice = {projectKey: string; repo: {slug: string; fullName: string}};
 type PullRequestState = {
   [repoFullName: string]: {lastUpdatedDate: number};
 };
@@ -15,7 +15,7 @@ export class PullRequests extends StreamBase {
     readonly config: BitbucketServerConfig,
     readonly logger: AirbyteLogger
   ) {
-    super(logger);
+    super(config, logger);
   }
 
   getJsonSchema(): Dictionary<any> {
@@ -31,13 +31,14 @@ export class PullRequests extends StreamBase {
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const project of this.config.projects) {
+    for await (const project of this.projects()) {
+      const projectKey = await this.fetchProjectKey(project.key);
       for (const repo of await this.server.repositories(
-        project,
-        this.config.repositories
+        projectKey,
+        this.projectRepoFilter
       )) {
         yield {
-          project,
+          projectKey,
           repo: {slug: repo.slug, fullName: repo.computedProperties.fullName},
         };
       }
@@ -50,12 +51,16 @@ export class PullRequests extends StreamBase {
     streamSlice: StreamSlice,
     streamState?: PullRequestState
   ): AsyncGenerator<PullRequest> {
-    const {project, repo} = streamSlice;
+    const {projectKey, repo} = streamSlice;
     const lastUpdatedDate =
       syncMode === SyncMode.INCREMENTAL
         ? streamState?.[repo.fullName]?.lastUpdatedDate
         : undefined;
-    const prs = this.server.pullRequests(project, repo.slug, lastUpdatedDate);
+    const prs = this.server.pullRequests(
+      projectKey,
+      repo.slug,
+      lastUpdatedDate
+    );
     for (const pr of await prs) {
       yield pr;
     }

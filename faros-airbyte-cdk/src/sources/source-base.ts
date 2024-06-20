@@ -1,6 +1,8 @@
-import {cloneDeep, keyBy} from 'lodash';
+import {keyBy, pick} from 'lodash';
+import toposort from 'toposort';
 import VError from 'verror';
 
+import {NonFatalError} from '../errors';
 import {AirbyteLogger} from '../logger';
 import {
   AirbyteCatalogMessage,
@@ -12,12 +14,22 @@ import {
   AirbyteMessage,
   AirbyteMessageType,
   AirbyteRecord,
+  AirbyteSourceConfigMessage,
+  AirbyteSourceStatusMessage,
   AirbyteState,
   AirbyteStateMessage,
+  isSourceStatusMessage,
+  isStateMessage,
   SyncMode,
 } from '../protocol';
 import {AirbyteSource} from './source';
+import {State} from './state';
 import {AirbyteStreamBase} from './streams/stream-base';
+
+type PartialAirbyteConfig = Pick<
+  AirbyteConfig,
+  'backfill' | 'max_slice_failures'
+>;
 
 /**
  * Airbyte Source base class providing additional boilerplate around the Check
@@ -26,7 +38,7 @@ import {AirbyteStreamBase} from './streams/stream-base';
  * streams.
  */
 export abstract class AirbyteSourceBase<
-  Config extends AirbyteConfig
+  Config extends AirbyteConfig,
 > extends AirbyteSource<Config> {
   constructor(protected readonly logger: AirbyteLogger) {
     super();
@@ -62,6 +74,18 @@ export abstract class AirbyteSourceBase<
    */
   get name(): string {
     return this.constructor.name;
+  }
+
+  /**
+   * Source type
+   */
+  abstract get type(): string;
+
+  /**
+   * Source mode
+   */
+  mode(config: Config): string | undefined {
+    return undefined;
   }
 
   /**
@@ -106,33 +130,82 @@ export abstract class AirbyteSourceBase<
    */
   async *read(
     config: Config,
+    redactedConfig: AirbyteConfig,
     catalog: AirbyteConfiguredCatalog,
-    state?: AirbyteState
+    state: AirbyteState
   ): AsyncGenerator<AirbyteMessage> {
     this.logger.info(`Syncing ${this.name}`);
-    const connectorState = cloneDeep(state ?? {});
+    yield new AirbyteSourceConfigMessage(
+      {data: maybeCompressState(config, state)},
+      redactedConfig,
+      this.type,
+      this.mode(config)
+    );
+
     // TODO: assert all streams exist in the connector
     // get the streams once in case the connector needs to make any queries to
     // generate them
     const streamInstances = keyBy(this.streams(config), (s) => s.name);
-    for (const configuredStream of catalog.streams) {
-      const streamName = configuredStream.stream.name;
-      const streamInstance = streamInstances[streamName];
-      if (!streamInstance) {
-        throw new VError(
-          `The requested stream ${streamName} was not found in the source. Available streams: ${Object.keys(
-            streamInstances
-          )}`
-        );
+    const configuredStreams = keyBy(catalog.streams, (s) => s.stream.name);
+    const configuredStreamNames = Object.keys(configuredStreams);
+
+    const missingStreams = configuredStreamNames.filter(
+      (streamName) => !streamInstances[streamName]
+    );
+    if (missingStreams.length > 0) {
+      throw new VError(
+        `The requested stream(s) ${JSON.stringify(
+          missingStreams
+        )} were not found in the source. Available streams: ${Object.keys(
+          streamInstances
+        )}`
+      );
+    }
+
+    const streamDeps: [string, string][] = [];
+    for (const [streamName, stream] of Object.entries(streamInstances)) {
+      if (!configuredStreamNames.includes(streamName)) {
+        // The stream is not requested in the catalog, ignore it
+        continue;
       }
+      for (const dependency of stream.dependencies) {
+        if (!configuredStreamNames.includes(dependency)) {
+          // The stream dependency is not requested in the catalog, ignore it
+          continue;
+        }
+        streamDeps.push([dependency, streamName]);
+      }
+    }
+
+    // Requested streams in the order they should be processed
+    const sortedStreams = toposort.array(configuredStreamNames, streamDeps);
+
+    const failedStreams = [];
+    for (const streamName of sortedStreams) {
+      const configuredStream = configuredStreams[streamName];
       try {
+        const streamInstance = streamInstances[streamName];
         const generator = this.readStream(
           streamInstance,
           configuredStream,
-          connectorState
+          state,
+          pick(config, ['backfill', 'max_slice_failures'])
         );
+
         for await (const message of generator) {
-          yield message;
+          if (isStateMessage(message)) {
+            const msgState = maybeCompressState(config, message.state.data);
+            if (isSourceStatusMessage(message)) {
+              yield new AirbyteSourceStatusMessage(
+                {data: msgState},
+                message.sourceStatus
+              );
+            } else {
+              yield new AirbyteStateMessage({data: msgState});
+            }
+          } else {
+            yield message;
+          }
         }
       } catch (e: any) {
         this.logger.error(
@@ -141,24 +214,70 @@ export abstract class AirbyteSourceBase<
           }`,
           e.stack
         );
-        throw e;
+        yield new AirbyteSourceStatusMessage(
+          {data: maybeCompressState(config, state)},
+          // TODO: complete error object with info from Source
+          {
+            status: 'ERRORED',
+            message: {
+              summary: e.message ?? JSON.stringify(e),
+              code: 0, // placeholder
+              action: 'Contact Faros Support', // placeholder
+              type: 'ERROR',
+            },
+          }
+        );
+
+        if (config.max_stream_failures == null) {
+          throw e;
+        }
+        failedStreams.push(streamName);
+        // -1 means unlimited allowed stream failures
+        if (
+          config.max_stream_failures !== -1 &&
+          failedStreams.length > config.max_stream_failures
+        ) {
+          this.logger.error(
+            `Exceeded maximum number of allowed stream failures: ${config.max_stream_failures}`
+          );
+          break;
+        }
       }
     }
+
+    if (failedStreams.length > 0) {
+      throw new VError(
+        `Encountered an error while reading stream(s): ${JSON.stringify(
+          failedStreams
+        )}`
+      );
+    }
+
+    yield new AirbyteSourceStatusMessage(
+      {data: maybeCompressState(config, state)},
+      {status: 'SUCCESS'}
+    );
     this.logger.info(`Finished syncing ${this.name}`);
   }
 
   private async *readStream(
     streamInstance: AirbyteStreamBase,
     configuredStream: AirbyteConfiguredStream,
-    connectorState: AirbyteState
+    connectorState: AirbyteState,
+    config: PartialAirbyteConfig
   ): AsyncGenerator<AirbyteMessage> {
     const useIncremental =
       configuredStream.sync_mode === SyncMode.INCREMENTAL &&
-      streamInstance.supportsIncremental;
+      streamInstance.supportsIncremental &&
+      !config.backfill;
 
-    const recordGenerator = useIncremental
-      ? this.readIncremental(streamInstance, configuredStream, connectorState)
-      : this.readFullRefresh(streamInstance, configuredStream);
+    const recordGenerator = this.doReadStream(
+      streamInstance,
+      configuredStream,
+      useIncremental ? SyncMode.INCREMENTAL : SyncMode.FULL_REFRESH,
+      connectorState,
+      config
+    );
 
     let recordCounter = 0;
     const streamName = configuredStream.stream.name;
@@ -176,14 +295,21 @@ export abstract class AirbyteSourceBase<
     );
   }
 
-  private async *readIncremental(
+  private async *doReadStream(
     streamInstance: AirbyteStreamBase,
     configuredStream: AirbyteConfiguredStream,
-    connectorState: AirbyteState
+    syncMode: SyncMode,
+    connectorState: AirbyteState,
+    config: PartialAirbyteConfig
   ): AsyncGenerator<AirbyteMessage> {
     const streamName = configuredStream.stream.name;
-    let streamState = connectorState[streamName] ?? {};
-    if (streamState) {
+    let streamState =
+      syncMode === SyncMode.INCREMENTAL ? connectorState[streamName] ?? {} : {};
+    if (config.backfill) {
+      this.logger.info(
+        `Running a backfill for ${streamName} stream. Stream state will be ignored and left unmodified.`
+      );
+    } else {
       this.logger.info(
         `Setting initial state of ${streamName} stream to ${JSON.stringify(
           streamState
@@ -198,10 +324,11 @@ export abstract class AirbyteSourceBase<
       );
     }
     const slices = streamInstance.streamSlices(
-      SyncMode.INCREMENTAL,
+      syncMode,
       configuredStream.cursor_field,
       streamState
     );
+    const failedSlices = [];
     for await (const slice of slices) {
       if (slice) {
         this.logger.info(
@@ -212,69 +339,91 @@ export abstract class AirbyteSourceBase<
       }
       let recordCounter = 0;
       const records = streamInstance.readRecords(
-        SyncMode.INCREMENTAL,
+        syncMode,
         configuredStream.cursor_field,
         slice,
         streamState
       );
-      for await (const recordData of records) {
-        recordCounter++;
-        yield AirbyteRecord.make(streamName, recordData);
-        streamState = streamInstance.getUpdatedState(streamState, recordData);
-        if (checkpointInterval && recordCounter % checkpointInterval === 0) {
+      try {
+        for await (const recordData of records) {
+          recordCounter++;
+          yield AirbyteRecord.make(streamName, recordData);
+          if (!config.backfill) {
+            streamState = streamInstance.getUpdatedState(
+              streamState,
+              recordData,
+              slice
+            );
+            if (
+              checkpointInterval &&
+              recordCounter % checkpointInterval === 0
+            ) {
+              yield this.checkpointState(
+                streamName,
+                streamState,
+                connectorState
+              );
+            }
+          }
+        }
+        if (!config.backfill) {
           yield this.checkpointState(streamName, streamState, connectorState);
         }
-      }
-      yield this.checkpointState(streamName, streamState, connectorState);
-      if (slice) {
-        this.logger.info(
-          `Finished processing ${streamName} stream slice ${JSON.stringify(
+        if (slice) {
+          this.logger.info(
+            `Finished processing ${streamName} stream slice ${JSON.stringify(
+              slice
+            )}. Read ${recordCounter} records`
+          );
+        }
+      } catch (e: any) {
+        if (e instanceof NonFatalError) {
+          this.logger.warn(
+            `Encountered a non-fatal error while processing ${streamName} stream slice ${JSON.stringify(
+              slice
+            )}: ${e.message ?? JSON.stringify(e)}`,
+            e.stack
+          );
+          yield this.errorState(streamName, streamState, connectorState, e);
+          continue;
+        }
+
+        if (!slice || config.max_slice_failures == null) {
+          throw e;
+        }
+        failedSlices.push(slice);
+        this.logger.error(
+          `Encountered an error while processing ${streamName} stream slice ${JSON.stringify(
             slice
-          )}. Read ${recordCounter} records`
+          )}: ${e.message ?? JSON.stringify(e)}`,
+          e.stack
         );
+        yield this.errorState(streamName, streamState, connectorState, e);
+        // -1 means unlimited allowed slice failures
+        if (
+          config.max_slice_failures !== -1 &&
+          failedSlices.length > config.max_slice_failures
+        ) {
+          this.logger.error(
+            `Exceeded maximum number of allowed slice failures: ${config.max_slice_failures}`
+          );
+          break;
+        }
       }
     }
-    this.logger.info(
-      `Last recorded state of ${streamName} stream is ${JSON.stringify(
-        streamState
-      )}`
-    );
-  }
-
-  private async *readFullRefresh(
-    streamInstance: AirbyteStreamBase,
-    configuredStream: AirbyteConfiguredStream
-  ): AsyncGenerator<AirbyteMessage> {
-    const streamName = configuredStream.stream.name;
-    const slices = streamInstance.streamSlices(
-      SyncMode.FULL_REFRESH,
-      configuredStream.cursor_field
-    );
-    for await (const slice of slices) {
-      if (slice) {
-        this.logger.info(
-          `Started processing ${streamName} stream slice ${JSON.stringify(
-            slice
-          )}`
-        );
-      }
-      let recordCounter = 0;
-      const records = streamInstance.readRecords(
-        SyncMode.FULL_REFRESH,
-        configuredStream.cursor_field,
-        slice
+    if (failedSlices.length > 0) {
+      throw new VError(
+        `Encountered an error while processing ${streamName} stream slice(s): ${JSON.stringify(
+          failedSlices
+        )}`
       );
-      for await (const record of records) {
-        recordCounter++;
-        yield AirbyteRecord.make(configuredStream.stream.name, record);
-      }
-      if (slice) {
-        this.logger.info(
-          `Finished processing ${streamName} stream slice ${JSON.stringify(
-            slice
-          )}. Read ${recordCounter} records`
-        );
-      }
+    }
+    if (!config.backfill) {
+      this.logger.info(
+        `Last recorded state of ${streamName} stream is ${JSON.stringify(
+          streamState
+        )}`
+      );
     }
   }
 
@@ -286,4 +435,33 @@ export abstract class AirbyteSourceBase<
     connectorState[streamName] = streamState;
     return new AirbyteStateMessage({data: connectorState});
   }
+
+  private errorState(
+    streamName: string,
+    streamState: any,
+    connectorState: AirbyteState,
+    error: Error
+  ): AirbyteStateMessage {
+    connectorState[streamName] = streamState;
+    return new AirbyteSourceStatusMessage(
+      {data: connectorState},
+      {
+        status: error instanceof NonFatalError ? 'RUNNING' : 'ERRORED',
+        // TODO: complete error object with info from Source
+        message: {
+          summary: error.message ?? JSON.stringify(error),
+          code: 0, // placeholder
+          action: 'Contact Faros Support', // placeholder
+          type: 'ERROR',
+        },
+      }
+    );
+  }
+}
+
+export function maybeCompressState(
+  config: AirbyteConfig,
+  state: AirbyteState
+): AirbyteState {
+  return config.compress_state === false ? state : State.compress(state);
 }

@@ -17,7 +17,7 @@
     "resources/"
   ],
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "main": "./lib",
   "scripts": {
@@ -31,11 +31,11 @@
     "watch": "tsc -b -w src test"
   },
   "dependencies": {
-    "axios": "^0.26.0",
-    "axios-retry": "^3.3.1",
+    "axios": "^1.6.5",
+    "axios-retry": "^4.0.0",
     "is-retry-allowed": "^2.2.0",
     "commander": "^9.3.0",
-    "luxon": "^3.2.1",
+    "luxon": "^3.4.4",
     "faros-airbyte-cdk": "0.0.1",
     "verror": "^1.10.1"
   },
@@ -47,15 +47,14 @@
     ],
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      ".d.ts",
-      ".js"
-    ],
     "testTimeout": 10000,
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "test/tsconfig.json"
-      }
+    "transform": {
+      "\\.[jt]sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "test/tsconfig.json"
+        }
+      ]
     }
   }
 }

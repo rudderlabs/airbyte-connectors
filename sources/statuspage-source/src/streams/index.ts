@@ -1,5 +1,8 @@
+import {ComponentGroups} from './component_groups';
+import {ComponentUptimes} from './component_uptimes';
+import {Components} from './components';
 import {Incidents} from './incidents';
-import {IncidentUpdates} from './incidentUpdates';
+import {Pages} from './pages';
 import {Users} from './users';
 
-export {Incidents, IncidentUpdates, Users};
+export {ComponentGroups, Components, ComponentUptimes, Incidents, Pages, Users};

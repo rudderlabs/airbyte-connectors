@@ -1,7 +1,7 @@
 import {Command} from 'commander';
 import {
-  AirbyteLogger,
   AirbyteSourceBase,
+  AirbyteSourceLogger,
   AirbyteSourceRunner,
   AirbyteSpec,
   AirbyteStreamBase,
@@ -9,17 +9,28 @@ import {
 import VError from 'verror';
 
 import {Statuspage, StatuspageConfig} from './statuspage';
-import {Incidents, IncidentUpdates, Users} from './streams';
+import {
+  ComponentGroups,
+  Components,
+  ComponentUptimes,
+  Incidents,
+  Pages,
+  Users,
+} from './streams';
 
 /** The main entry point. */
 export function mainCommand(): Command {
-  const logger = new AirbyteLogger();
+  const logger = new AirbyteSourceLogger();
   const source = new StatuspageSource(logger);
   return new AirbyteSourceRunner(logger, source).mainCommand();
 }
 
 /** Statuspage source implementation. */
 export class StatuspageSource extends AirbyteSourceBase<StatuspageConfig> {
+  get type(): string {
+    return 'statuspage';
+  }
+
   async spec(): Promise<AirbyteSpec> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return new AirbyteSpec(require('../resources/spec.json'));
@@ -35,9 +46,12 @@ export class StatuspageSource extends AirbyteSourceBase<StatuspageConfig> {
   }
   streams(config: StatuspageConfig): AirbyteStreamBase[] {
     return [
-      new Incidents(config, this.logger),
-      new IncidentUpdates(config, this.logger),
-      new Users(config, this.logger),
-    ];
+      ComponentGroups,
+      Components,
+      Incidents,
+      Pages,
+      Users,
+      ComponentUptimes,
+    ].map((Stream) => new Stream(config, this.logger));
   }
 }

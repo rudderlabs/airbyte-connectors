@@ -3,6 +3,7 @@ import axios, {
   AxiosInstance,
   AxiosResponse,
   AxiosResponseHeaders,
+  RawAxiosResponseHeaders,
 } from 'axios';
 import axiosRetry, {IAxiosRetryConfig} from 'axios-retry';
 import {AirbyteLogger} from 'faros-airbyte-cdk';
@@ -97,7 +98,6 @@ export class SemaphoreCI {
       logger,
       config.branches
     );
-    logger.debug('Created SemaphoreCI instance');
     return SemaphoreCI.semaphoreci;
   }
 
@@ -120,7 +120,9 @@ export class SemaphoreCI {
     }
   }
 
-  private extractLinkHeaders(headers: AxiosResponseHeaders): Links {
+  private extractLinkHeaders(
+    headers: RawAxiosResponseHeaders | AxiosResponseHeaders
+  ): Links {
     const linkHeader = headers[SEMAPHORE_PAGE_HEADER];
 
     return parse(linkHeader);

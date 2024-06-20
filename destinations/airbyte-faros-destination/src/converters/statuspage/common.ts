@@ -1,6 +1,13 @@
 import {AirbyteRecord} from 'faros-airbyte-cdk';
+import VError from 'verror';
 
-import {Converter, parseObjectConfig, StreamContext} from '../converter';
+import {Common, ComputeApplication} from '../common/common';
+import {
+  Converter,
+  parseObjectConfig,
+  StreamContext,
+  StreamName,
+} from '../converter';
 
 type ApplicationMapping = Record<string, {name: string; platform?: string}>;
 
@@ -30,6 +37,20 @@ export enum ComponentStatus {
   operational = 'operational',
   partial_outage = 'partial_outage',
   under_maintenance = 'under_maintenance',
+}
+
+export interface ComponentUptime {
+  id: string;
+  name: string;
+  range_start: string;
+  range_end: string;
+  uptime_percentage: number;
+  major_outage: number;
+  partial_outage: number;
+  warnings: ReadonlyArray<string>;
+  related_events: ReadonlyArray<{id: string}>;
+  page_id: string;
+  group_id?: string;
 }
 
 export enum IncidentEventTypeCategory {
@@ -80,6 +101,11 @@ export enum IncidentPriorityCategory {
   Custom = 'Custom',
 }
 
+export interface IncidentSeverity {
+  category: IncidentSeverityCategory;
+  detail: string;
+}
+
 export enum IncidentSeverityCategory {
   Sev1 = 'Sev1',
   Sev2 = 'Sev2',
@@ -89,10 +115,33 @@ export enum IncidentSeverityCategory {
   Custom = 'Custom',
 }
 
-export interface IncidentSeverity {
-  category: IncidentSeverityCategory;
+export enum ApplicationImpactCategory {
+  Operational = 'Operational',
+  UnderMaintenance = 'UnderMaintenance',
+  DegradedPerformance = 'DegradedPerformance',
+  PartialOutage = 'PartialOutage',
+  MajorOutage = 'MajorOutage',
+  Custom = 'Custom',
+}
+
+export interface ApplicationImpact {
+  category: ApplicationImpactCategory;
   detail: string;
 }
+
+export const ComponentGroupsStream = new StreamName(
+  'statuspage',
+  'component_groups'
+);
+
+export const ComponentsStream = new StreamName('statuspage', 'components');
+
+export const ComponentUptimesStream = new StreamName(
+  'statuspage',
+  'component_uptimes'
+);
+
+export const PagesStream = new StreamName('statuspage', 'pages');
 
 /** Statuspage converter base */
 export abstract class StatuspageConverter extends Converter {
@@ -114,5 +163,31 @@ export abstract class StatuspageConverter extends Converter {
         'Application Mapping'
       ) ?? {}
     );
+  }
+
+  protected computeApplication(
+    ctx: StreamContext,
+    component: Component
+  ): ComputeApplication {
+    const mappedApp = this.applicationMapping(ctx)[component.name];
+    if (mappedApp) {
+      return Common.computeApplication(mappedApp.name, mappedApp.platform);
+    }
+    const page = ctx.get(PagesStream.asString, component.page_id);
+    if (!page) {
+      throw new VError('No page record found for id %s', component.page_id);
+    }
+    let platform = page.record.data.name;
+    if (component.group_id) {
+      const group = ctx.get(ComponentGroupsStream.asString, component.group_id);
+      if (!group) {
+        throw new VError(
+          'No component group record found for id %s',
+          component.group_id
+        );
+      }
+      platform = `${group.record.data.name}/${platform}`;
+    }
+    return Common.computeApplication(component.name, platform);
   }
 }

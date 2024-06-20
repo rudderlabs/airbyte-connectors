@@ -23,6 +23,17 @@ export abstract class AirbyteStreamBase {
   }
 
   /**
+   * Override to return a list of stream names that this stream depends on. Adding a stream
+   * to this list will ensure that the stream is always run
+   * (if requested in the configured catalog) before this stream.
+   *
+   * @returns An array of stream names that this stream depends on.
+   */
+  get dependencies(): ReadonlyArray<string> {
+    return [];
+  }
+
+  /**
    * This method should be overridden by subclasses to read records based on the
    * inputs
    */
@@ -73,9 +84,24 @@ export abstract class AirbyteStreamBase {
         'Cursor field cannot be null, undefined, or empty string'
       );
     }
-    return typeof this.cursorField === 'string'
-      ? [this.cursorField]
-      : this.cursorField;
+
+    const cursorField =
+      typeof this.cursorField === 'string'
+        ? [this.cursorField]
+        : this.cursorField;
+
+    // Airbyte UI on version >= 0.51.x does not support nested cursor fields,
+    // resulting in an error on Connection setup. We work around this issue by
+    // only sending the first value in the cursorField array during the
+    // "discover" step. This workaround should not affect the functionality of
+    // the connectors, as the streams define their own cursor logic and do not
+    // rely on the value of wrappedCursorField (our sources do not allow the
+    // user to change the default cursor field).
+    // https://github.com/airbytehq/airbyte/issues/36253
+    if (process.env.WORKER_JOB_ID) {
+      return cursorField.length ? [cursorField[0]] : [];
+    }
+    return cursorField;
   }
 
   /**
@@ -150,11 +176,13 @@ export abstract class AirbyteStreamBase {
    *
    * @param currentStreamState The stream's current state object
    * @param latestRecord The latest record extracted from the stream
+   * @param streamSlice The current stream slice being processed
    * @returns An updated state object
    */
   getUpdatedState(
     currentStreamState: Dictionary<any>,
-    latestRecord: Dictionary<any>
+    latestRecord: Dictionary<any>,
+    streamSlice?: Dictionary<any>
   ): Dictionary<any> {
     return {};
   }

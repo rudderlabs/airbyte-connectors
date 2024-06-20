@@ -1,0 +1,528 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`index check connection - invalid bucketing config - non positive integer 1`] = `
+AirbyteConnectionStatusMessage {
+  "connectionStatus": {
+    "message": "bucket_total must be a positive integer",
+    "status": "FAILED",
+  },
+  "type": "CONNECTION_STATUS",
+}
+`;
+
+exports[`index check connection 1`] = `
+AirbyteConnectionStatusMessage {
+  "connectionStatus": {
+    "status": "SUCCEEDED",
+  },
+  "type": "CONNECTION_STATUS",
+}
+`;
+
+exports[`index onBeforeRead with run_mode WebhookSupplement should filter streams 1`] = `
+{
+  "streams": [
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_issue_pull_requests",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_sprint_reports",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_board_issues",
+      },
+      "sync_mode": "full_refresh",
+    },
+  ],
+}
+`;
+
+exports[`index onBeforeRead without run_mode defaults to full mode streams 1`] = `
+{
+  "streams": [
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_issue_pull_requests",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_sprint_reports",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_board_issues",
+      },
+      "sync_mode": "full_refresh",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_sprints",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_users",
+      },
+      "sync_mode": "full_refresh",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_projects",
+      },
+      "sync_mode": "full_refresh",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_issues",
+      },
+      "sync_mode": "incremental",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_boards",
+      },
+      "sync_mode": "full_refresh",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_project_versions",
+      },
+      "sync_mode": "full_refresh",
+    },
+    {
+      "stream": {
+        "json_schema": {},
+        "name": "faros_project_version_issues",
+      },
+      "sync_mode": "full_refresh",
+    },
+  ],
+}
+`;
+
+exports[`index stream with project slices using bucket 1 1`] = `
+[
+  {
+    "project": "TEST",
+  },
+  {
+    "project": "TEST3",
+  },
+]
+`;
+
+exports[`index stream with project slices using bucket 2 1`] = `
+[
+  {
+    "project": "TEST",
+  },
+  {
+    "project": "TEST3",
+  },
+]
+`;
+
+exports[`index streams - additional fields 1`] = `
+[
+  {
+    "additionalFields": [
+      [
+        "Custom Number Filed",
+        "1",
+      ],
+      [
+        "Custom String Field",
+        "Test",
+      ],
+    ],
+    "key": "TEST-1",
+    "updated": 2024-03-14T12:00:00.000Z,
+  },
+  {
+    "additionalFields": [
+      [
+        "Custom Number Filed",
+        "2",
+      ],
+      [
+        "Custom String Field",
+        "Test 2",
+      ],
+    ],
+    "key": "TEST-2",
+    "updated": 2024-03-14T12:00:00.000Z,
+  },
+]
+`;
+
+exports[`index streams - board_issues using board ids 1`] = `
+[
+  {
+    "boardId": "1",
+    "key": "TEST-1",
+  },
+  {
+    "boardId": "1",
+    "key": "TEST-2",
+  },
+]
+`;
+
+exports[`index streams - boards 1`] = `
+[
+  {
+    "name": "Tasks without a board in project TEST",
+    "projectKey": "TEST",
+    "uid": "faros-tasks-with-no-board-TEST",
+  },
+  {
+    "id": 1,
+    "name": "Board 1",
+    "projectKey": "TEST",
+    "type": "scrum",
+    "uid": "1",
+  },
+  {
+    "id": 2,
+    "name": "Board 2",
+    "projectKey": "TEST",
+    "type": "scrum",
+    "uid": "2",
+  },
+  {
+    "id": 3,
+    "name": "Board 3",
+    "projectKey": "TEST",
+    "type": "kanban",
+    "uid": "3",
+  },
+]
+`;
+
+exports[`index streams - issue_pull_requests 1`] = `
+[
+  {
+    "issue": {
+      "key": "TEST-1",
+      "project": "TEST",
+      "updated": 2024-03-14T12:00:00.000Z,
+    },
+    "number": 123,
+    "repo": {
+      "name": "test-repo",
+      "org": "test-org",
+      "source": "GitHub",
+    },
+  },
+  {
+    "issue": {
+      "key": "TEST-2",
+      "project": "TEST",
+      "updated": 2024-03-14T12:00:00.000Z,
+    },
+    "number": 123,
+    "repo": {
+      "name": "test-repo",
+      "org": "test-org",
+      "source": "GitHub",
+    },
+  },
+]
+`;
+
+exports[`index streams - project version issues 1`] = `
+[
+  {
+    "key": "TEST-1",
+    "projectVersionId": "10000",
+  },
+  {
+    "key": "TEST-2",
+    "projectVersionId": "10000",
+  },
+]
+`;
+
+exports[`index streams - project versions 1`] = `
+[
+  {
+    "description": "Initial release of the project",
+    "id": "10000",
+    "name": "Version 1.0",
+    "projectId": 1,
+    "projectKey": "TEST",
+    "releaseDate": "2023-03-01",
+    "startDate": "2023-01-01",
+  },
+  {
+    "description": "Second release of the project",
+    "id": "10001",
+    "name": "Version 2.0",
+    "projectId": 1,
+    "projectKey": "TEST",
+    "releaseDate": "2023-06-01",
+    "startDate": "2023-04-01",
+  },
+]
+`;
+
+exports[`index streams - projects - Cloud project list 1`] = `
+[
+  {
+    "description": "This is a test",
+    "id": "1234",
+    "key": "TEST-1",
+    "name": "Test 1",
+  },
+  {
+    "description": "This is a test",
+    "id": "1235",
+    "key": "TEST-2",
+    "name": "Test 2",
+  },
+  {
+    "description": "This is a test",
+    "id": "1236",
+    "key": "TEST-3",
+    "name": "Test 3",
+  },
+]
+`;
+
+exports[`index streams - projects - Jira Server - project list 1`] = `
+[
+  {
+    "description": "This is a test",
+    "id": "1234",
+    "key": "TEST-1",
+    "name": "Test 1",
+  },
+  {
+    "description": "This is a test",
+    "id": "1235",
+    "key": "TEST-2",
+    "name": "Test 2",
+  },
+]
+`;
+
+exports[`index streams - projects - Jira Server 1`] = `
+[
+  {
+    "description": "This is a test",
+    "id": "1234",
+    "key": "TEST-1",
+    "name": "Test 1",
+  },
+  {
+    "description": "This is a test",
+    "id": "1235",
+    "key": "TEST-2",
+    "name": "Test 2",
+  },
+  {
+    "description": "This is a test",
+    "id": "1236",
+    "key": "TEST-3",
+    "name": "Test 3",
+  },
+]
+`;
+
+exports[`index streams - projects - pull all projects 1`] = `
+[
+  {
+    "description": "This is a test",
+    "id": "1234",
+    "key": "TEST-1",
+    "name": "Test 1",
+  },
+  {
+    "description": "This is a test",
+    "id": "1235",
+    "key": "TEST-2",
+    "name": "Test 2",
+  },
+  {
+    "description": "This is a test",
+    "id": "1236",
+    "key": "TEST-3",
+    "name": "Test 3",
+  },
+]
+`;
+
+exports[`index streams - sprint_reports 1`] = `
+[
+  {
+    "boardId": "1",
+    "completeDate": 2024-03-14T12:00:00.000Z,
+    "issues": [
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-1",
+        "points": 5,
+        "status": "Completed",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-2",
+        "points": 5,
+        "status": "Completed",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-5",
+        "points": 5,
+        "status": "CompletedOutsideSprint",
+      },
+      {
+        "addedDuringSprint": true,
+        "key": "TEST-3",
+        "points": 10,
+        "status": "NotCompleted",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-4",
+        "points": 15,
+        "status": "NotCompleted",
+      },
+      {
+        "addedDuringSprint": true,
+        "key": "TEST-6",
+        "points": 20,
+        "status": "Removed",
+      },
+    ],
+    "sprintId": 1,
+  },
+]
+`;
+
+exports[`index streams - sprint_reports with run mode WebhookSupplement using Faros client 1`] = `
+[
+  {
+    "boardId": "1",
+    "completeDate": 2024-01-01T00:00:00.000Z,
+    "issues": [
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-1",
+        "points": 5,
+        "status": "Completed",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-2",
+        "points": 5,
+        "status": "Completed",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-5",
+        "points": 5,
+        "status": "CompletedOutsideSprint",
+      },
+      {
+        "addedDuringSprint": true,
+        "key": "TEST-3",
+        "points": 10,
+        "status": "NotCompleted",
+      },
+      {
+        "addedDuringSprint": undefined,
+        "key": "TEST-4",
+        "points": 15,
+        "status": "NotCompleted",
+      },
+      {
+        "addedDuringSprint": true,
+        "key": "TEST-6",
+        "points": 20,
+        "status": "Removed",
+      },
+    ],
+    "sprintId": 1,
+  },
+]
+`;
+
+exports[`index streams - sprints 1`] = `
+[
+  {
+    "activatedDate": "2024-03-14T12:00:00Z",
+    "boardId": 1,
+    "completeDate": "2024-03-14T12:00:00Z",
+    "endDate": "2024-03-14T12:00:00Z",
+    "id": 1,
+    "name": "Test Sprint",
+    "originBoardId": 1,
+    "startDate": "2024-03-14T12:00:00Z",
+    "state": "closed",
+  },
+]
+`;
+
+exports[`index streams - team memberships 1`] = `
+[
+  {
+    "memberId": "12334c037692da100700011",
+    "teamId": "1234567890asas123132",
+  },
+  {
+    "memberId": "3214dfa413fc70069d12323",
+    "teamId": "1234567890asas123132",
+  },
+]
+`;
+
+exports[`index streams - teams 1`] = `
+[
+  {
+    "displayName": "Test",
+    "id": "1234567890asas123132",
+  },
+]
+`;
+
+exports[`index streams - users 1`] = `
+[
+  {
+    "accountId": "8425d037692dx1332747h4e74",
+    "active": true,
+    "displayName": "User 1",
+    "id": "8425d037692dx1332747h4e74",
+  },
+  {
+    "accountId": "8j849p1e0756990975d95k56",
+    "active": false,
+    "displayName": "User 2",
+    "id": "8j849p1e0756990975d95k56",
+  },
+]
+`;

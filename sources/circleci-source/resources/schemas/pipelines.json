@@ -40,7 +40,7 @@
               "type": "string"
             },
             "avatar_url": {
-              "type": "string"
+              "type": ["string", "null"]
             }
           }
         }
@@ -134,6 +134,14 @@
               }
             }
           }
+        }
+      }
+    },
+    "computedProperties": {
+      "type": "object",
+      "properties": {
+        "updatedAt": {
+          "type": "string"
         }
       }
     }

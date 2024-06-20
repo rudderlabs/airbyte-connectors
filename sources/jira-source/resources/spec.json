@@ -1,0 +1,229 @@
+{
+  "documentationUrl": "https://docs.faros.ai",
+  "connectionSpecification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Jira Configuration Spec",
+    "type": "object",
+    "required": [
+      "url"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "url": {
+        "order": 1,
+        "type": "string",
+        "title": "Jira URL",
+        "description": "URL of the Jira instance, e.g., https://airbyteio.atlassian.net (Cloud), https://my-jira-server.com (Server/DC)",
+        "examples": [
+          "https://domainname.atlassian.net",
+          "https://my-jira-server.com"
+        ]
+      },
+      "username": {
+        "order": 2,
+        "type": "string",
+        "title": "Username",
+        "description": "The user email for your Jira account. Required when using Cloud. Do NOT use in combination with Server/DC Personal access token"
+      },
+      "password": {
+        "order": 3,
+        "type": "string",
+        "title": "Password (Server/DC) or API Token (Cloud)",
+        "description": "The password (Server/DC) or API Token (Cloud) for your Jira account. Required when using Cloud. Do NOT use in combination with Server/DC Personal access token",
+        "airbyte_secret": true
+      },
+      "token": {
+        "order": 4,
+        "type": "string",
+        "title": "Personal access token (Server/DC)",
+        "description": "Personal access token. See https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html for more information.",
+        "airbyte_secret": true
+      },
+      "additional_fields": {
+        "order": 5,
+        "type": "array",
+        "title": "Additional Fields",
+        "items": {
+          "type": "string"
+        },
+        "description": "Fields to include on tasks. Use '*' to include all fields.",
+        "examples": [
+          "*",
+          "Last Viewed",
+          "Priority"
+        ]
+      },
+      "additional_fields_array_limit": {
+        "order": 7,
+        "type": "integer",
+        "title": "Additional Fields Array Limit",
+        "description": "Truncates an additional fields array value to the given length",
+        "default": 50
+      },
+      "reject_unauthorized": {
+        "order": 8,
+        "type": "boolean",
+        "title": "Enable certificate validation",
+        "description": "Enable certificate validation for the Jira server",
+        "default": true
+      },
+      "concurrency_limit": {
+        "order": 9,
+        "type": "integer",
+        "title": "Concurrency Limit",
+        "description": "Controls the concurrency of certain tasks",
+        "default": 5
+      },
+      "max_retries": {
+        "order": 10,
+        "type": "integer",
+        "title": "Max Retries",
+        "description": "Maximum number of retries to use when a Jira API request fails",
+        "default": 2
+      },
+      "page_size": {
+        "order": 11,
+        "type": "integer",
+        "title": "Page Size",
+        "description": "Maximum number of items in a paginated response",
+        "default": 250
+      },
+      "timeout": {
+        "order": 12,
+        "type": "integer",
+        "title": "Request Timeout",
+        "description": "Timeout in milliseconds for each request to the Jira API.",
+        "default": 120000
+      },
+      "use_users_prefix_search": {
+        "order": 13,
+        "type": "boolean",
+        "title": "Use Users Prefix Search",
+        "default": false
+      },
+      "projects": {
+        "order": 14,
+        "title": "Project Keys",
+        "description": "List of Jira project keys from which to fetch data.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "examples": [
+          "PROJ1",
+          "PROJ2"
+        ]
+      },
+      "cutoff_days": {
+        "order": 15,
+        "type": "integer",
+        "title": "Cutoff Days",
+        "default": 90,
+        "description": "Only fetch data updated after cutoff"
+      },
+      "cutoff_lag_days": {
+        "order": 16,
+        "type": "integer",
+        "title": "Cutoff Lag Days",
+        "default": 0,
+        "description": "Apply lag to the end cutoff saved in the state. Objects updated after this will be rewritten during the next sync."
+      },
+      "boards": {
+        "order": 17,
+        "title": "Board IDs",
+        "description": "List of Jira board IDs from which to fetch data.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "run_mode": {
+        "order": 18,
+        "title": "Run Mode",
+        "description": "Run mode for selecting the usage of the connector",
+        "type": "string",
+        "default": "Full",
+        "enum": [
+          "Full",
+          "Minimum",
+          "WebhookSupplement",
+          "AdditionalFields"
+        ]
+      },
+      "bucket_id": {
+        "order": 19,
+        "type": "integer",
+        "title": "Bucket Number",
+        "description": "Bucket number for this source to determine which portion of projects and boards to pull. Use it when distributing the load between multiple sources.",
+        "default": 1
+      },
+      "bucket_total": {
+        "order": 20,
+        "type": "integer",
+        "title": "Total Number of Buckets",
+        "description": "Total number of buckets to distribute projects and boards across. Use it when distributing the load between multiple sources",
+        "default": 1
+      },
+      "api_url": {
+        "order": 21,
+        "type": "string",
+        "title": "Faros API URL",
+        "description": "The Faros API URL.",
+        "default": "https://prod.api.faros.ai"
+      },
+      "api_key": {
+        "order": 22,
+        "title": "Faros API Key",
+        "type": "string",
+        "description": "The Faros API key to use to access the API.",
+        "airbyte_secret": true
+      },
+      "graph": {
+        "order": 23,
+        "type": "string",
+        "title": "Graph name",
+        "description": "The Faros graph name.",
+        "default": "default"
+      },
+      "use_sprints_reverse_search": {
+        "order": 24,
+        "type": "boolean",
+        "title": "Use Sprints Reverse Search",
+        "description": "Fetch closed sprints starting with most recent in backlog. Use this for Jira instances with a lots closed sprints and syncing sprints is slow.",
+        "default": false
+      },
+      "backfill": {
+        "order": 25,
+        "type": "boolean",
+        "title": "Backfill",
+        "description": "Backfill data from the start date to the end date.",
+        "default": false
+      },
+      "start_date": {
+        "order": 26,
+        "type": "string",
+        "title": "Start Date",
+        "description": "The date from which to start syncing data. Only use for backfilling."
+      },
+      "end_date": {
+        "order": 27,
+        "type": "string",
+        "title": "End Date",
+        "description": "The date at which to stop syncing data. Only use for backfilling."
+      },
+      "fetch_teams": {
+        "order": 28,
+        "type": "boolean",
+        "title": "Fetch Teams",
+        "description": "Fetch teams from organization to populate teams and team memberships.",
+        "default": false
+      },
+      "organization_id": {
+        "order": 29,
+        "type": "string",
+        "title": "Organization ID",
+        "description": "Atlassian organization ID for fetching teams. Required only when using Fetch Teams with Jira Cloud. See https://confluence.atlassian.com/jirakb/what-it-is-the-organization-id-and-where-to-find-it-1207189876.html for information on how to find it."
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import {api} from '@pagerduty/pdjs';
 import {PartialCall} from '@pagerduty/pdjs/build/src/api';
 import {AirbyteLogger, wrapApiError} from 'faros-airbyte-cdk';
+import {DateTime} from 'luxon';
 import {VError} from 'verror';
 
 export const DEFAULT_CUTOFF_DAYS = 90;
@@ -35,10 +36,11 @@ export interface PagerdutyConfig {
   readonly default_severity?: IncidentSeverityCategory;
   readonly incident_log_entries_overview?: boolean;
   readonly exclude_services?: ReadonlyArray<string>;
+  readonly service_details?: ReadonlyArray<string>;
   readonly max_retries?: number;
 }
 
-interface PagerdutyResponse<Type> {
+export interface PagerdutyResponse<Type> {
   url: string;
   status: number;
   statusText: string;
@@ -58,6 +60,10 @@ interface PagerdutyObject {
 export interface User extends PagerdutyObject {
   readonly email: string;
   readonly name: string;
+  readonly time_zone: string; // tzinfo
+  readonly role: string;
+  readonly description: string;
+  readonly job_title: string;
 }
 
 export interface Team extends PagerdutyObject {
@@ -70,6 +76,7 @@ export interface LogEntry extends PagerdutyObject {
   readonly incident: PagerdutyObject;
   readonly service: PagerdutyObject;
   readonly event_details?: Record<string, any>; // e.g. trigger events have "description" detail
+  readonly agent: PagerdutyObject;
 }
 
 export interface Incident extends PagerdutyObject {
@@ -91,8 +98,9 @@ export interface Priority extends PagerdutyObject {
   readonly name: string;
 }
 
-interface Service extends PagerdutyObject {
-  name: string;
+export interface Service extends PagerdutyObject {
+  readonly name: string;
+  readonly teams: PagerdutyObject[];
 }
 
 const DEFAULT_MAX_RETRIES = 5;
@@ -106,6 +114,7 @@ export class Pagerduty {
   constructor(
     private readonly client: PartialCall,
     private readonly logger: AirbyteLogger,
+    private readonly pageSize = DEFAULT_PAGE_SIZE,
     private readonly maxRetries = DEFAULT_MAX_RETRIES
   ) {}
 
@@ -115,12 +124,13 @@ export class Pagerduty {
     if (!config.token) {
       throw new VError('token must be not an empty string');
     }
-
     const client = api({token: config.token});
-
-    Pagerduty.pagerduty = new Pagerduty(client, logger, config.max_retries);
-    logger.debug('Created Pagerduty instance');
-
+    Pagerduty.pagerduty = new Pagerduty(
+      client,
+      logger,
+      config.page_size,
+      config.max_retries
+    );
     return Pagerduty.pagerduty;
   }
 
@@ -146,6 +156,7 @@ export class Pagerduty {
         errorMessage = wrapError.message;
       }
       errorMessage = `Error from ${url}. Message: ${errorMessage}`;
+
       if (++retries > this.maxRetries) {
         throw new VError('%s', errorMessage);
       } else {
@@ -166,6 +177,16 @@ export class Pagerduty {
     let fetchNextFunc;
 
     do {
+      // Deal with PagerDuty 10000 records response limit
+      if (
+        response?.status == 400 &&
+        response?.data?.error?.errors?.[0]?.includes('Offset')
+      ) {
+        this.logger.warn(
+          `Reached PagerDuty API response size limit of 10000 records.`
+        );
+        return undefined;
+      }
       if (response?.status >= 300) {
         throw new VError(
           '%s',
@@ -205,60 +226,28 @@ export class Pagerduty {
     }
   }
 
-  async *getUsers(
-    state?: User | null,
-    cursorField?: string[]
-  ): AsyncGenerator<User> {
-    const func = (): Promise<PagerdutyResponse<User>> => {
-      return this.client.get(`/users`);
-    };
-    yield* this.paginate<User>(func, (item): boolean => {
-      if (state) {
-        const fieldsExistingList = cursorField.map((f) => item[f] === state[f]);
-        return fieldsExistingList.findIndex((b) => !b) <= -1;
-      }
-      return false;
-    });
+  async *getUsers(): AsyncGenerator<User> {
+    const resource = `/users`;
+    this.logger.debug(`Fetching Users at ${resource}`);
+    yield* this.paginate<User>(() => this.client.get(resource));
   }
 
-  async *getTeams(
-    since?: string,
-    limit = DEFAULT_PAGE_SIZE
-  ): AsyncGenerator<Team> {
-    let until: Date;
-    let timeRange = '&date_range=all';
-    if (since) {
-      until = new Date(since);
-      until.setMonth(new Date(since).getMonth() + 5); //default time window is 1 month, setting to max
-      until.setHours(0, 0, 0); //rounding down to whole day
-
-      timeRange = `&since=${since}&until=${until.toISOString()}`;
-    }
-    const limitParam = `&limit=${limit}`;
-    const teamsResource = `/teams?time_zone=UTC${timeRange}${limitParam}`;
-    this.logger.debug(`Fetching Team at ${teamsResource}`);
-    yield* this.paginate<Team>(() => this.client.get(teamsResource));
+  async *getTeams(): AsyncGenerator<Team> {
+    const resource = `/teams`;
+    this.logger.debug(`Fetching Team at ${resource}`);
+    yield* this.paginate<Team>(() => this.client.get(resource));
   }
 
   async *getIncidents(
-    since?: string,
-    limit = DEFAULT_PAGE_SIZE,
+    since: DateTime,
+    until: DateTime,
     exclude_services: ReadonlyArray<string> = []
   ): AsyncGenerator<Incident> {
-    let until: Date;
-    let timeRange = '&date_range=all';
-    if (since) {
-      until = new Date(since);
-      until.setMonth(new Date(since).getMonth() + 5); //default time window is 1 month, setting to max
-      until.setHours(0, 0, 0); //rounding down to whole day
+    const params = new URLSearchParams({time_zone: 'UTC'});
 
-      timeRange = `&since=${since}&until=${until.toISOString()}`;
-    }
-
-    const limitParam = `&limit=${limit}`;
     const services: (Service | undefined)[] = [];
     if (exclude_services?.length > 0) {
-      const servicesIter = this.getServices(limit);
+      const servicesIter = this.getServices([]);
       for await (const service of servicesIter) {
         if (
           exclude_services.includes(service.name) ||
@@ -277,33 +266,58 @@ export class Pagerduty {
 
     // query per service to minimize chance of hitting 10000 records response limit
     for (const service of services) {
-      let serviceIdsParam = '';
       if (service) {
         this.logger.debug(
           `Fetching Incidents for service id: ${service.id}, name: ${service.name}, summary: ${service.summary}`
         );
-        serviceIdsParam = `&service_ids[]=${service.id}`;
+        params.set('service_ids[]', service.id);
       }
-      const incidentsResource = `/incidents?time_zone=UTC${timeRange}${serviceIdsParam}${limitParam}`;
-      this.logger.debug(`Fetching Incidents at ${incidentsResource}`);
-      yield* this.paginate<Incident>(() => this.client.get(incidentsResource));
+
+      const diff = until.diff(since, 'days');
+      this.logger.debug(
+        `Fetching Incidents in range ${since} - ${until}. Total of ${diff.days} days.`
+      );
+
+      for (let d = 0; d < diff.days; d++) {
+        params.set('since', until.minus({days: d + 1}).toISO());
+        params.set('until', until.minus({days: d}).toISO());
+
+        const resource = `/incidents?${params}`;
+        this.logger.debug(`Fetching Incidents at ${resource}`);
+        yield* this.paginate<Incident>(() => this.client.get(resource));
+      }
     }
   }
 
   async *getIncidentLogEntries(
-    since?: string,
-    until?: Date,
-    limit: number = DEFAULT_PAGE_SIZE,
+    since: DateTime,
+    until: DateTime,
     isOverview = DEFAULT_OVERVIEW
   ): AsyncGenerator<LogEntry> {
-    const sinceParam = since ? `&since=${since}` : '';
-    const untilParam = until ? `&until=${until.toISOString()}` : '';
-    const limitParam = `&limit=${limit}`;
-    const isOverviewParam = `&is_overview=${isOverview}`;
+    const params = new URLSearchParams({
+      is_overview: `${isOverview}`,
+      time_zone: 'UTC',
+    });
 
-    const logsResource = `/log_entries?time_zone=UTC${sinceParam}${untilParam}${limitParam}${isOverviewParam}`;
-    this.logger.debug(`Fetching Log Entries at ${logsResource}`);
-    yield* this.paginate<LogEntry>(() => this.client.get(logsResource));
+    const diff = until.diff(since, 'days');
+    this.logger.debug(
+      `Fetching Log Entries in range ${since} - ${until}. Total of ${diff.days} days.`
+    );
+
+    for (let d = 0; d < diff.days; d++) {
+      params.set('since', until.minus({days: d + 1}).toISO());
+      params.set('until', until.minus({days: d}).toISO());
+
+      const resource = `/log_entries?${params}`;
+      this.logger.debug(`Fetching Log Entries at ${resource}`);
+      const sinceJSDate = since.toJSDate();
+      const iter = this.paginate<LogEntry>(() => this.client.get(resource));
+      for await (const logEntry of iter) {
+        if (new Date(logEntry.created_at) > sinceJSDate) {
+          yield logEntry;
+        }
+      }
+    }
   }
 
   async *getPrioritiesResource(): AsyncGenerator<Priority> {
@@ -322,9 +336,13 @@ export class Pagerduty {
   }
 
   async *getServices(
-    limit: number = DEFAULT_PAGE_SIZE
+    details: ReadonlyArray<string> = []
   ): AsyncGenerator<Service> {
-    const servicesResource = `/services?limit=${limit}`;
+    const params = new URLSearchParams({});
+    for (const detail of details) {
+      params.append('include[]', detail);
+    }
+    const servicesResource = `/services?${params}`;
     this.logger.debug(`Fetching Services at ${servicesResource}`);
     const func = (): any => {
       return this.client.get(servicesResource);

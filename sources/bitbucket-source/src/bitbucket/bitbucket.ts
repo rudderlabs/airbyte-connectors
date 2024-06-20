@@ -68,8 +68,6 @@ export class Bitbucket {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - config.cutoff_days);
     Bitbucket.bitbucket = new Bitbucket(client, pagelen, logger, startDate);
-    logger.debug('Created Bitbucket instance');
-
     return Bitbucket.bitbucket;
   }
 
@@ -219,7 +217,7 @@ export class Bitbucket {
     } catch (err) {
       throw new VError(
         this.buildInnerError(err),
-        'Error fetching deployment(s) for repository "%s/%s"',
+        'Error fetching deployments for repository "%s/%s"',
         workspace,
         repoSlug
       );
@@ -431,7 +429,7 @@ export class Bitbucket {
         } catch (err) {
           const stringifiedError = JSON.stringify(this.buildInnerError(err));
           this.logger.warn(
-            `Failed fetching Diff Stat(s) for pull request #${pr.id} in repo ${workspace}/${repoSlug}. Error: ${stringifiedError}`
+            `Failed fetching diff stats for pull request #${pr.id} in repo ${workspace}/${repoSlug}. Error: ${stringifiedError}`
           );
         }
         const commits = new Set<string>();
@@ -462,7 +460,7 @@ export class Bitbucket {
         } catch (err) {
           const stringifiedError = JSON.stringify(this.buildInnerError(err));
           this.logger.warn(
-            `Failed fetching Activities(s) for pull request #${pr.id} in repo ${workspace}/${repoSlug}. Error: ${stringifiedError}`
+            `Failed fetching activities for pull request #${pr.id} in repo ${workspace}/${repoSlug}. Error: ${stringifiedError}`
           );
         }
         res.calculatedActivity = {commitCount: commits.size, mergedAt};
@@ -472,7 +470,7 @@ export class Bitbucket {
     } catch (err) {
       throw new VError(
         this.buildInnerError(err),
-        'Error fetching PullRequest(s) for repository "%s/%s"',
+        'Error fetching pull requests for repository "%s/%s"',
         workspace,
         repoSlug
       );
@@ -632,7 +630,7 @@ export class Bitbucket {
       return;
     }
 
-    const {data} = await this.limiter.schedule(() =>
+    const {data}: {data: T} = await this.limiter.schedule(() =>
       this.client.getNextPage(currentData)
     );
     return data;
@@ -643,10 +641,10 @@ export class Bitbucket {
     buildTo: (data: Dictionary<any>) => T,
     isNew?: (data: T) => boolean
   ): AsyncGenerator<T> {
-    let {data} = await func();
+    let {data}: {data: T | {values: T[]}} = await func();
 
     if (!data) return undefined;
-    const existValues = 'values' in data && Array.isArray(data.values);
+    const existValues = data['values'] && Array.isArray(data['values']);
     if (!existValues) {
       yield buildTo(data) as any;
       return undefined;
@@ -954,7 +952,7 @@ export class Bitbucket {
         type: data.target?.type,
         refType: data.target?.ref_type,
         refName: data.target?.ref_name,
-        selector: {type: data.target?.selector.type},
+        selector: {type: data.target?.selector?.type},
         commit: {
           type: data.target?.commit?.type,
           hash: data.target?.commit?.hash,

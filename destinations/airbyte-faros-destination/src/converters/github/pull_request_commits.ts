@@ -1,4 +1,5 @@
 import {AirbyteRecord} from 'faros-airbyte-cdk';
+import {Utils} from 'faros-js-client';
 
 import {RepoKey} from '../common/vcs';
 import {DestinationModel, DestinationRecord} from '../converter';
@@ -24,9 +25,15 @@ export class PullRequestCommits extends GitHubConverter {
 
     if (!repository) return [];
 
+    const author = prCommit.author?.login
+      ? {uid: prCommit.author.login, source}
+      : null;
+
     const commit = {
       uid: prCommit.sha,
       sha: prCommit.sha,
+      author,
+      createdAt: Utils.toDate(prCommit.commit.author?.date),
       repository,
     };
 

@@ -45,7 +45,8 @@ We have implemented [a lot of converters](https://github.com/faros-ai/airbyte-co
 
 ### Custom Sources
 
-For custom or internal sources you can use Faros Destination as npm package in your project without having to fork or open PRs against this repo:
+For custom or internal sources, you can use Faros Destination as an npm package in your project without having to fork or open PRs against this repo.
+For a complete example, check out the [Custom Faros Destination Example](https://github.com/faros-ai/custom-faros-destination-example) repository.
 
 ```
 npm i airbyte-faros-destination
@@ -167,6 +168,13 @@ Example `catalog.json`
 }
 ```
 
+To view debug logs from airbyte, set the following environment variable:
+
+```shell
+export LOG_LEVEL="debug";
+./bin/main write --config config.json --catalog catalog.json;
+```
+
 **Tip**: you can even pipe data directly from your custom source into your custom destination without Airbyte server while prefixing your streams (as expected by Faros Destination):
 
 ```shell
@@ -176,3 +184,31 @@ Example `catalog.json`
 ### Additional Commands
 
 Run `./bin/main --help` for detailed information on available commands.
+
+### Visual Studio Code Debugging
+
+```
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Program",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "destinations/airbyte-faros-destination/bin/main",
+            "console": "integratedTerminal",
+            "args": [
+                "write",
+                "--config", "config.json",
+                "--catalog", "catalog.json",
+                "<", "streams.log"
+              ]
+        }
+    ]
+}
+```
+
+Don't forget to rebuild after code changes

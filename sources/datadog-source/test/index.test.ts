@@ -1,7 +1,7 @@
 import {v1, v2} from '@datadog/datadog-api-client';
 import {
-  AirbyteLogger,
   AirbyteLogLevel,
+  AirbyteSourceLogger,
   AirbyteSpec,
   SyncMode,
 } from 'faros-airbyte-cdk';
@@ -20,7 +20,7 @@ function readTestResourceFile(fileName: string): any {
 }
 
 describe('index', () => {
-  const logger = new AirbyteLogger(
+  const logger = new AirbyteSourceLogger(
     // Shush messages in tests, unless in debug
     process.env.LOG_LEVEL === 'debug'
       ? AirbyteLogLevel.DEBUG
@@ -143,6 +143,7 @@ describe('index', () => {
     expect(items[0]).toStrictEqual({
       displayName: 'system.cpu.idle',
       id: '186b347b33f1ffb049439fba14dc3090-system.cpu.idle-1575317847',
+      queryHash: '186b347b33f1ffb049439fba14dc3090',
       metric: 'system.cpu.idle',
       perUnit: undefined,
       primaryUnit: {
@@ -191,6 +192,7 @@ describe('index', () => {
     expect(items[0]).toStrictEqual({
       displayName: 'system.cpu.idle',
       id: '186b347b33f1ffb049439fba14dc3090-system.cpu.idle-1575317847',
+      queryHash: '186b347b33f1ffb049439fba14dc3090',
       metric: 'system.cpu.idle',
       perUnit: undefined,
       primaryUnit: {

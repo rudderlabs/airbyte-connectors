@@ -1,13 +1,20 @@
-import axios, {AxiosInstance, AxiosRequestConfig, AxiosResponse} from 'axios';
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosRequestConfig,
+  AxiosResponse,
+} from 'axios';
 import axiosRetry, {
   IAxiosRetryConfig,
   isIdempotentRequestError,
 } from 'axios-retry';
-import {AirbyteLogger, wrapApiError} from 'faros-airbyte-cdk';
+import {AirbyteLogger, base64Encode, wrapApiError} from 'faros-airbyte-cdk';
+import https from 'https';
 import isRetryAllowed from 'is-retry-allowed';
 import {DateTime} from 'luxon';
 import {Dictionary} from 'ts-essentials';
 import {Memoize} from 'typescript-memoize';
+import url from 'url';
 import {VError} from 'verror';
 
 import {
@@ -32,11 +39,14 @@ import {
 } from './models';
 
 const DEFAULT_API_VERSION = '7.0';
+export const DEFAULT_BRANCH_PATTERN = '^main$';
 const DEFAULT_GRAPH_VERSION = '7.1-preview.1';
 export const DEFAULT_PAGE_SIZE = 100;
 export const DEFAULT_REQUEST_TIMEOUT = 60000;
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_CUTOFF_DAYS = 90;
+const DEFAULT_API_URL = 'https://dev.azure.com';
+const DEFAULT_GRAPH_URL = 'https://vssps.dev.azure.com';
 
 export interface AzureRepoConfig {
   readonly access_token: string;
@@ -49,6 +59,9 @@ export interface AzureRepoConfig {
   readonly page_size?: number;
   readonly request_timeout?: number;
   readonly max_retries?: number;
+  readonly api_url?: string;
+  readonly graph_api_url?: string;
+  readonly reject_unauthorized?: boolean;
 }
 
 export class AzureRepos {
@@ -61,8 +74,8 @@ export class AzureRepos {
     private readonly maxRetries: number,
     private readonly logger: AirbyteLogger,
     private projects: string[],
-    private readonly cutoffDays?: number,
-    private readonly branchPattern?: RegExp
+    private readonly cutoffDays: number,
+    private readonly branchPattern: RegExp
   ) {}
 
   static async make(
@@ -81,26 +94,38 @@ export class AzureRepos {
       throw new VError('Projects provided in addition to * keyword');
     }
 
-    const base64EncodedAccessToken = Buffer.from(
-      `${':'}${config.access_token}`,
-      'binary'
-    ).toString('base64');
+    const accessToken = base64Encode(`:${config.access_token}`);
+
+    function makeAgent(baseUrl: string): https.Agent {
+      const isHttps = new url.URL(baseUrl).protocol.startsWith('https');
+      if (!isHttps) {
+        return undefined;
+      }
+      return new https.Agent({
+        rejectUnauthorized: config.reject_unauthorized ?? true,
+        timeout: config.request_timeout ?? DEFAULT_REQUEST_TIMEOUT,
+      });
+    }
 
     const httpClient = axios.create({
-      baseURL: `https://dev.azure.com/${config.organization}`,
+      baseURL: `${config.api_url ?? DEFAULT_API_URL}/${config.organization}`,
       timeout: config.request_timeout ?? DEFAULT_REQUEST_TIMEOUT,
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
       params: {'api-version': config.api_version ?? DEFAULT_API_VERSION},
-      headers: {Authorization: `Basic ${base64EncodedAccessToken}`},
+      headers: {Authorization: `Basic ${accessToken}`},
+      httpsAgent: makeAgent(config.api_url ?? DEFAULT_API_URL),
     });
     const graphClient = axios.create({
-      baseURL: `https://vssps.dev.azure.com/${config.organization}/_apis/graph`,
+      baseURL: `${config.graph_api_url ?? DEFAULT_GRAPH_URL}/${
+        config.organization
+      }/_apis/graph`,
       timeout: config.request_timeout ?? DEFAULT_REQUEST_TIMEOUT,
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
       params: {'api-version': config.graph_version ?? DEFAULT_GRAPH_VERSION},
-      headers: {Authorization: `Basic ${base64EncodedAccessToken}`},
+      headers: {Authorization: `Basic ${accessToken}`},
+      httpsAgent: makeAgent(config.graph_api_url ?? DEFAULT_GRAPH_URL),
     });
 
     const top = config.page_size ?? DEFAULT_PAGE_SIZE;
@@ -113,7 +138,7 @@ export class AzureRepos {
         isRetryAllowed(error) // Prevents retrying unsafe errors
       );
     };
-    const retryCondition = (error: Error): boolean => {
+    const retryCondition = (error: AxiosError): boolean => {
       return isNetworkError(error) || isIdempotentRequestError(error);
     };
 
@@ -133,9 +158,9 @@ export class AzureRepos {
     axiosRetry(httpClient, retryConfig);
     axiosRetry(graphClient, retryConfig);
 
-    const branchPattern = config.branch_pattern
-      ? new RegExp(config.branch_pattern)
-      : undefined;
+    const branchPattern = new RegExp(
+      config.branch_pattern || DEFAULT_BRANCH_PATTERN
+    );
 
     const cutoffDays = config.cutoff_days ?? DEFAULT_CUTOFF_DAYS;
 
@@ -168,7 +193,7 @@ export class AzureRepos {
 
     this.logger.info(
       `Projects that will be synced: [${AzureRepos.instance.projects.join(
-        ', '
+        ','
       )}]`
     );
   }
@@ -320,7 +345,7 @@ export class AzureRepos {
       `${project}/_apis/git/repositories/${repo.id}/stats/branches`
     );
     for (const branch of branchRes?.data?.value ?? []) {
-      if (this.branchPattern && !this.branchPattern.test(branch.name)) {
+      if (!this.branchPattern.test(branch.name)) {
         this.logger.info(
           `Skipping branch ${branch.name} since it does not match ${this.branchPattern} pattern`
         );
@@ -344,16 +369,19 @@ export class AzureRepos {
   ): Promise<Tag[]> {
     const tagRes = await this.get<TagResponse>(
       `${project}/_apis/git/repositories/${repo.id}/refs`,
-      {filter: 'tags'}
+      {filter: 'tags', peelTags: 'true'}
     );
     const tags = [];
     for (const tag of tagRes?.data?.value ?? []) {
-      const tagItem: Tag = tag;
-      const tagCommitRes = await this.get<TagCommit>(
-        `git/repositories/${repo.id}/annotatedtags/${tag.objectId}`
-      );
-      tagItem.commit = tagCommitRes?.data ?? null;
-      tags.push(tagItem);
+      // Per docs, annotated tags will populate the peeledObjectId property
+      if (tag.peeledObjectId) {
+        const tagItem: Tag = tag;
+        const tagCommitRes = await this.get<TagCommit>(
+          `${project}/_apis/git/repositories/${repo.id}/annotatedtags/${tag.objectId}`
+        );
+        tagItem.commit = tagCommitRes?.data ?? null;
+        tags.push(tagItem);
+      }
     }
     return tags;
   }

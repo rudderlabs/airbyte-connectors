@@ -8,7 +8,13 @@ export const githubAllStreamsLog = readTestResourceFile(
 export const jenkinsAllStreamsLog = readTestResourceFile(
   'jenkins/all-streams.log'
 );
+export const farosJiraAllStreamsLog = readTestResourceFile(
+  'faros_jira/all-streams.log'
+);
 export const jiraAllStreamsLog = readTestResourceFile('jira/all-streams.log');
+export const airtableSurveysAllStreamsLog = readTestResourceFile(
+  'abstract-surveys/surveys/all-streams.log'
+);
 export const asanaAllStreamsLog = readTestResourceFile('asana/all-streams.log');
 export const gitlabAllStreamsLog = readTestResourceFile(
   'gitlab/all-streams.log'
@@ -94,4 +100,43 @@ export const farosFeedsAllStreamsLog = readTestResourceFile(
 );
 export const semaphoreciAllStreamLogs = readTestResourceFile(
   'semaphoreci/all-streams.log'
+);
+export const sheetsSurveysAllStreamsLog = readTestResourceFile(
+  'sheets/surveys/all-streams.log'
+);
+export const hygieiaAllStreamsLog = readTestResourceFile(
+  'hygieia/all-streams.log'
+);
+export const notionAllStreamsLog = readTestResourceFile(
+  'notion/all-streams.log'
+);
+export const octopusAllStreamsLog = readTestResourceFile(
+  'octopus/all-streams.log'
+);
+export const testrailsAllStreamsLog = readTestResourceFile(
+  'testrails/all-streams.log'
+);
+export const farosGraphDoctorAllStreamsLog = readTestResourceFile(
+  'faros_graphdoctor/all-streams.log'
+);
+export const workdayV1StreamsLog = readTestResourceFile(
+  'workday/stream_v1.log'
+);
+export const workdayV3StreamsLog = readTestResourceFile(
+  'workday/stream_v3.log'
+);
+export const workdayV4StreamsLog = readTestResourceFile(
+  'workday/stream_v4.log'
+);
+export const awsCloudwatchMetricsStreamsLog = readTestResourceFile(
+  'aws-cloudwatch-metrics/all-streams.log'
+);
+export const awsCloudwatchMetricsStreamsInput = readTestResourceFile(
+  'aws-cloudwatch-metrics/input.json'
+);
+export const zendeskAllStreamsLog = readTestResourceFile(
+  'zendesk/all-streams.log'
+);
+export const trelloAllStreamsLog = readTestResourceFile(
+  'trello/all-streams.log'
 );
