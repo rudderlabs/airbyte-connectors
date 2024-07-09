@@ -15,7 +15,8 @@
           ]
         ],
         "default_cursor_field": [
-          "updated_at"
+          "computedProperties",
+          "updatedAt"
         ]
       },
       "sync_mode": "incremental",

@@ -22,12 +22,14 @@
   ],
   "main": "./lib",
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "exports": {
     "./bitbucket-server": "./lib/bitbucket-server/index.js",
     "./clickup": "./lib/clickup/index.js",
-    "./common": "./lib/common/common.js"
+    "./common": "./lib/common/index.js",
+    "./jira": "./lib/jira/index.js",
+    "./xray": "./lib/xray/index.js"
   },
   "typesVersions": {
     "*": {
@@ -39,6 +41,12 @@
       ],
       "common": [
         "./lib/common/index.d.ts"
+      ],
+      "jira": [
+        "./lib/jira/index.d.ts"
+      ],
+      "xray": [
+        "./lib/xray/index.d.ts"
       ]
     }
   },
@@ -52,7 +60,10 @@
     "test-cov": "jest --coverage --verbose --color",
     "watch": "tsc -b -w src test"
   },
-  "dependencies": {},
+  "dependencies": {
+    "jira.js": "^4.0.0",
+    "luxon": "^3.4.4"
+  },
   "jest": {
     "coverageDirectory": "out/coverage",
     "coveragePathIgnorePatterns": [
@@ -61,15 +72,17 @@
     ],
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      ".d.ts",
-      ".js"
-    ],
     "testTimeout": 10000,
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "test/tsconfig.json"
-      }
+    "transform": {
+      "\\.[jt]sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "test/tsconfig.json"
+        }
+      ]
+    },
+    "snapshotFormat": {
+      "printBasicPrototype": true
     }
   }
 }

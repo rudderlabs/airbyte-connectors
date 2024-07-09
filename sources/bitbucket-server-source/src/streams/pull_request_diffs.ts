@@ -14,7 +14,7 @@ export class PullRequestDiffs extends PullRequestSubStream {
     readonly config: BitbucketServerConfig,
     readonly logger: AirbyteLogger
   ) {
-    super(logger);
+    super(config, logger);
   }
 
   getJsonSchema(): Dictionary<any> {
@@ -34,7 +34,7 @@ export class PullRequestDiffs extends PullRequestSubStream {
     streamSlice: StreamSlice,
     streamState?: PullRequestDiffState
   ): AsyncGenerator<PullRequestDiff> {
-    const {project, repo} = streamSlice;
+    const {projectKey: project, repo} = streamSlice;
     const lastUpdatedDate =
       syncMode === SyncMode.INCREMENTAL
         ? streamState?.[repo.fullName]?.lastUpdatedDate

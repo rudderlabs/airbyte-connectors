@@ -1,21 +1,28 @@
-import {AirbyteLog, AirbyteLogLevel} from 'faros-airbyte-cdk';
-import _ from 'lodash';
 import {getLocal} from 'mockttp';
 
-import {CLI, read} from '../cli';
-import {initMockttp, tempConfig, testLogger} from '../testing-tools';
-import {pagerdutyAllStreamsLog} from './data';
+import {initMockttp, sourceSpecificTempConfig} from '../testing-tools';
+import {destinationWriteTest} from './utils';
 
 describe('pagerduty', () => {
-  const logger = testLogger();
   const mockttp = getLocal({debug: false, recordTraffic: false});
-  const catalogPath = 'test/resources/pagerduty/catalog.json';
   let configPath: string;
-  const streamNamePrefix = 'mytestsource__pagerduty__';
 
   beforeEach(async () => {
     await initMockttp(mockttp);
-    configPath = await tempConfig(mockttp.url);
+    configPath = await sourceSpecificTempConfig(mockttp.url, {
+      pagerduty: {associate_applications_to_teams: true},
+    });
+    await mockttp
+      .forPost('/graphs/test-graph/graphql')
+      .once()
+      .thenReply(
+        200,
+        JSON.stringify({
+          data: {
+            org: {teams: {edges: [{node: {uid: 'eng', name: 'Engineering'}}]}},
+          },
+        })
+      );
   });
 
   afterEach(async () => {
@@ -23,63 +30,10 @@ describe('pagerduty', () => {
   });
 
   test('process records from all streams', async () => {
-    const cli = await CLI.runWith([
-      'write',
-      '--config',
+    await destinationWriteTest({
       configPath,
-      '--catalog',
-      catalogPath,
-      '--dry-run',
-    ]);
-    cli.stdin.end(pagerdutyAllStreamsLog, 'utf8');
-
-    const stdout = await read(cli.stdout);
-    logger.debug(stdout);
-
-    const processedByStream = {
-      incident_log_entries: 3,
-      incidents: 3,
-      users: 1,
-    };
-    const processed = _(processedByStream)
-      .toPairs()
-      .map((v) => [`${streamNamePrefix}${v[0]}`, v[1]])
-      .orderBy(0, 'asc')
-      .fromPairs()
-      .value();
-
-    const writtenByModel = {
-      compute_Application: 1,
-      ims_Incident: 3,
-      ims_IncidentApplicationImpact: 3,
-      ims_IncidentAssignment: 3,
-      ims_IncidentEvent: 3,
-      ims_User: 1,
-    };
-
-    const processedTotal = _(processedByStream).values().sum();
-    const writtenTotal = _(writtenByModel).values().sum();
-    expect(stdout).toMatch(`Processed ${processedTotal} records`);
-    expect(stdout).toMatch(`Would write ${writtenTotal} records`);
-    expect(stdout).toMatch('Errored 0 records');
-    expect(stdout).toMatch('Skipped 0 records');
-    expect(stdout).toMatch(
-      JSON.stringify(
-        AirbyteLog.make(
-          AirbyteLogLevel.INFO,
-          `Processed records by stream: ${JSON.stringify(processed)}`
-        )
-      )
-    );
-    expect(stdout).toMatch(
-      JSON.stringify(
-        AirbyteLog.make(
-          AirbyteLogLevel.INFO,
-          `Would write records by model: ${JSON.stringify(writtenByModel)}`
-        )
-      )
-    );
-    expect(await read(cli.stderr)).toBe('');
-    expect(await cli.wait()).toBe(0);
+      catalogPath: 'test/resources/pagerduty/catalog.json',
+      inputRecordsPath: 'pagerduty/all-streams.log',
+    });
   });
 });

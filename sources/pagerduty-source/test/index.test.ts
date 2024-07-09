@@ -1,7 +1,7 @@
 import {PartialCall} from '@pagerduty/pdjs/build/src/api';
 import {
-  AirbyteLogger,
   AirbyteLogLevel,
+  AirbyteSourceLogger,
   AirbyteSpec,
   SyncMode,
 } from 'faros-airbyte-cdk';
@@ -20,7 +20,7 @@ function readTestResourceFile(fileName: string): any {
 }
 
 describe('index', () => {
-  const logger = new AirbyteLogger(
+  const logger = new AirbyteSourceLogger(
     // Shush messages in tests, unless in debug
     process.env.LOG_LEVEL === 'debug'
       ? AirbyteLogLevel.DEBUG
@@ -83,19 +83,19 @@ describe('index', () => {
   test('streams - incidentLogEntries, use full_refresh sync mode', async () => {
     const fnIncidentLogEntriesList = jest.fn();
 
+    const expectedEntries = readTestResourceFile('incidentLogEntries.json').map(
+      (entry) => {
+        return {...entry, created_at: new Date().toISOString()};
+      }
+    );
     Pagerduty.instance = jest.fn().mockImplementation(() => {
       return new Pagerduty(
         {
-          get: fnIncidentLogEntriesList.mockImplementation(
-            async (path: string) => {
-              const isPathMatch = path.match(/^\/log_entries/);
-              if (isPathMatch) {
-                return {
-                  resource: readTestResourceFile('incidentLogEntries.json'),
-                };
-              }
-            }
-          ),
+          get: fnIncidentLogEntriesList
+            .mockResolvedValueOnce({
+              resource: expectedEntries,
+            })
+            .mockResolvedValue({resource: []}),
         } as unknown as PartialCall,
         logger
       );
@@ -113,10 +113,8 @@ describe('index', () => {
     for await (const logEntry of incidentLogEntriesIter) {
       incidentLogEntries.push(logEntry);
     }
-    expect(fnIncidentLogEntriesList).toHaveBeenCalledTimes(1);
-    expect(incidentLogEntries).toStrictEqual(
-      readTestResourceFile('incidentLogEntries.json')
-    );
+    expect(fnIncidentLogEntriesList).toHaveBeenCalledTimes(90);
+    expect(incidentLogEntries).toStrictEqual(expectedEntries);
   });
 
   test('streams - incidents, use full_refresh sync mode', async () => {
@@ -125,14 +123,11 @@ describe('index', () => {
     Pagerduty.instance = jest.fn().mockImplementation(() => {
       return new Pagerduty(
         {
-          get: fnIncidentsList.mockImplementation(async (path: string) => {
-            const isPathMatch = path.match(/^\/incidents/);
-            if (isPathMatch) {
-              return {
-                resource: readTestResourceFile('incidents.json'),
-              };
-            }
-          }),
+          get: fnIncidentsList
+            .mockResolvedValueOnce({
+              resource: readTestResourceFile('incidents.json'),
+            })
+            .mockResolvedValue({resource: []}),
         } as unknown as PartialCall,
         logger
       );
@@ -149,12 +144,13 @@ describe('index', () => {
       incidents.push(incident);
     }
 
-    expect(fnIncidentsList).toHaveBeenCalledTimes(1);
+    expect(fnIncidentsList).toHaveBeenCalledTimes(90);
     expect(incidents).toStrictEqual(readTestResourceFile('incidents.json'));
   });
 
   test('streams - incidents, exclude services', async () => {
     const fnList = jest.fn();
+    let returnedIncidents = false;
 
     Pagerduty.instance = jest.fn().mockImplementation(() => {
       return new Pagerduty(
@@ -166,6 +162,10 @@ describe('index', () => {
                 .split('&')
                 .filter((p) => p.startsWith('service_ids[]='))
                 .map((p) => p.split('=')[1]);
+              if (returnedIncidents) {
+                return {resource: []};
+              }
+              returnedIncidents = true;
               return {
                 resource: (
                   readTestResourceFile('incidents.json') as Incident[]
@@ -196,7 +196,7 @@ describe('index', () => {
       incidents.push(incident);
     }
 
-    expect(fnList).toHaveBeenCalledTimes(2);
+    expect(fnList).toHaveBeenCalledTimes(91); // list services once + 90 days
     expect(incidents).toStrictEqual(
       (readTestResourceFile('incidents.json') as Incident[]).filter(
         (i) => i.service.summary !== 'Service2'
@@ -247,6 +247,80 @@ describe('index', () => {
     );
   });
 
+  test('streams - services, use full_refresh sync mode', async () => {
+    const fnServicesList = jest.fn();
+
+    Pagerduty.instance = jest.fn().mockImplementation(() => {
+      return new Pagerduty(
+        {
+          get: fnServicesList.mockImplementation(async (path: string) => {
+            const isPathMatch = path.match(/^\/services/);
+            if (isPathMatch) {
+              return {
+                resource: readTestResourceFile('services.json'),
+                response: {
+                  ok: true,
+                },
+              };
+            }
+          }),
+        } as unknown as PartialCall,
+        logger
+      );
+    });
+    const source = new sut.PagerdutySource(logger);
+    const streams = source.streams({
+      token: 'pass',
+    });
+
+    const servicesStream = streams[3];
+    const iter = servicesStream.readRecords(SyncMode.FULL_REFRESH);
+    const service = [];
+    for await (const priority of iter) {
+      service.push(priority);
+    }
+
+    expect(fnServicesList).toHaveBeenCalledTimes(1);
+    expect(service).toStrictEqual(readTestResourceFile('services.json'));
+  });
+
+  test('streams - teams, use full_refresh sync mode', async () => {
+    const fnTeamsList = jest.fn();
+
+    Pagerduty.instance = jest.fn().mockImplementation(() => {
+      return new Pagerduty(
+        {
+          get: fnTeamsList.mockImplementation(async (path: string) => {
+            const isPathMatch = path.match(/^\/teams/);
+            if (isPathMatch) {
+              return {
+                resource: readTestResourceFile('teams.json'),
+                response: {
+                  ok: true,
+                },
+              };
+            }
+          }),
+        } as unknown as PartialCall,
+        logger
+      );
+    });
+    const source = new sut.PagerdutySource(logger);
+    const streams = source.streams({
+      token: 'pass',
+    });
+
+    const TeamsStream = streams[4];
+    const TeamsIter = TeamsStream.readRecords(SyncMode.FULL_REFRESH);
+    const priorities = [];
+    for await (const priority of TeamsIter) {
+      priorities.push(priority);
+    }
+
+    expect(fnTeamsList).toHaveBeenCalledTimes(1);
+    expect(priorities).toStrictEqual(readTestResourceFile('teams.json'));
+  });
+
   test('streams - users, use full_refresh sync mode', async () => {
     const fnUsersList = jest.fn();
 
@@ -270,7 +344,7 @@ describe('index', () => {
       token: 'pass',
     });
 
-    const usersStream = streams[3];
+    const usersStream = streams[5];
     const usersIter = usersStream.readRecords(SyncMode.FULL_REFRESH);
     const users = [];
     for await (const user of usersIter) {
@@ -278,42 +352,5 @@ describe('index', () => {
     }
     expect(fnUsersList).toHaveBeenCalledTimes(1);
     expect(users).toStrictEqual(readTestResourceFile('users.json'));
-  });
-
-  test('streams - Teams, use full_refresh sync mode', async () => {
-    const fnTeamsList = jest.fn();
-
-    Pagerduty.instance = jest.fn().mockImplementation(() => {
-      return new Pagerduty(
-        {
-          get: fnTeamsList.mockImplementation(async (path: string) => {
-            const isPathMatch = path.match(/^\/priorities/);
-            if (isPathMatch) {
-              return {
-                resource: readTestResourceFile('teams.json'),
-                response: {
-                  ok: true,
-                },
-              };
-            }
-          }),
-        } as unknown as PartialCall,
-        logger
-      );
-    });
-    const source = new sut.PagerdutySource(logger);
-    const streams = source.streams({
-      token: 'pass',
-    });
-
-    const TeamsStream = streams[2];
-    const TeamsIter = TeamsStream.readRecords(SyncMode.FULL_REFRESH);
-    const priorities = [];
-    for await (const priority of TeamsIter) {
-      priorities.push(priority);
-    }
-
-    expect(fnTeamsList).toHaveBeenCalledTimes(1);
-    expect(priorities).toStrictEqual(readTestResourceFile('teams.json'));
   });
 });

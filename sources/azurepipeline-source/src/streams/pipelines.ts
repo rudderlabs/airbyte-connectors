@@ -29,7 +29,7 @@ export class Pipelines extends AirbyteStreamBase {
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const project of this.config.project_names) {
+    for (const project of this.config.projects) {
       yield {
         project,
       };
@@ -41,7 +41,7 @@ export class Pipelines extends AirbyteStreamBase {
     cursorField?: string[],
     streamSlice?: StreamSlice
   ): AsyncGenerator<Pipeline> {
-    const azurePipeline = AzurePipeline.instance(this.config);
-    yield* azurePipeline.getPipelines(streamSlice.project);
+    const azurePipeline = AzurePipeline.instance(this.config, this.logger);
+    yield* azurePipeline.getPipelines(streamSlice.project, this.logger);
   }
 }

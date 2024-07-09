@@ -14,6 +14,23 @@
       },
       "url": "/rest/api/latest/projects/{projectKey}"
     },
+    "getProjects": {
+      "headers": {
+        "accept": "application/json"
+      },
+      "method": "GET",
+      "params": {
+        "start": {
+          "in": "query",
+          "type": "integer"
+        },
+        "limit": {
+          "in": "query",
+          "type": "integer"
+        }
+      },
+      "url": "/rest/api/latest/projects"
+    },
     "getRepositories": {
       "headers": {
         "accept": "application/json"
@@ -35,6 +52,28 @@
         }
       },
       "url": "/rest/api/latest/projects/{projectKey}/repos"
+    },
+    "getUsers": {
+      "headers": {
+        "accept": "application/json"
+      },
+      "method": "GET",
+      "params": {
+        "projectKey": {
+          "in": "path",
+          "required": true,
+          "type": "string"
+        },
+        "start": {
+          "in": "query",
+          "type": "integer"
+        },
+        "limit": {
+          "in": "query",
+          "type": "integer"
+        }
+      },
+      "url": "/rest/api/latest/projects/{projectKey}/permissions/users"
     }
   },
   "pullRequests": {
@@ -95,9 +134,44 @@
         "limit": {
           "in": "query",
           "type": "integer"
+        },
+        "ignoreMissing": {
+          "in": "query",
+          "type": "boolean"
         }
       },
       "url": "/rest/api/latest/projects/{projectKey}/repos/{repositorySlug}/commits"
+    },
+    "getTags": {
+      "headers": {
+        "accept": "application/json"
+      },
+      "method": "GET",
+      "params": {
+        "projectKey": {
+          "in": "path",
+          "required": true,
+          "type": "string"
+        },
+        "repositorySlug": {
+          "in": "path",
+          "required": true,
+          "type": "string"
+        },
+        "orderBy": {
+          "in": "query",
+          "type": "string"
+        },
+        "start": {
+          "in": "query",
+          "type": "integer"
+        },
+        "limit": {
+          "in": "query",
+          "type": "integer"
+        }
+      },
+      "url": "/rest/api/latest/projects/{projectKey}/repos/{repositorySlug}/tags"
     }
   }
 }

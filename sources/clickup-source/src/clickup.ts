@@ -1,4 +1,9 @@
-import axios, {AxiosInstance, AxiosRequestConfig, AxiosResponse} from 'axios';
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosRequestConfig,
+  AxiosResponse,
+} from 'axios';
 import axiosRetry, {
   IAxiosRetryConfig,
   isIdempotentRequestError,
@@ -49,7 +54,7 @@ export class ClickUp {
     const api = axios.create({
       baseURL: BASE_API_URL,
       timeout: cfg.timeout ?? DEFAULT_TIMEOUT,
-      maxContentLength: cfg.max_content_length ?? DEFAULT_MAX_CONTENT_LENGTH,
+      maxContentLength: Infinity,
       headers: {
         authorization: cfg.token,
         'content-type': 'application/json',
@@ -64,7 +69,7 @@ export class ClickUp {
         isRetryAllowed(error) // Prevents retrying unsafe errors
       );
     };
-    const retryCondition = (error: Error): boolean => {
+    const retryCondition = (error: AxiosError): boolean => {
       return isNetworkError(error) || isIdempotentRequestError(error);
     };
     const maxRetries = cfg.max_retries ?? DEFAULT_MAX_RETRIES;

@@ -1,7 +1,13 @@
 import {AirbyteRecord} from 'faros-airbyte-cdk';
 import {Utils} from 'faros-js-client';
+import {Dictionary} from 'ts-essentials';
 
-import {DestinationModel, DestinationRecord} from '../converter';
+import {
+  DestinationModel,
+  DestinationRecord,
+  StreamContext,
+  StreamName,
+} from '../converter';
 import {AsanaCommon, AsanaConverter, AsanaSection} from './common';
 
 interface CustomField {
@@ -23,6 +29,11 @@ interface TmsTaskStatus {
   detail: string;
 }
 
+interface TmsTaskStatusChange {
+  status: TmsTaskStatus;
+  changedAt: Date;
+}
+
 enum Tms_TaskStatusCategory {
   Custom = 'Custom',
   Done = 'Done',
@@ -30,127 +41,140 @@ enum Tms_TaskStatusCategory {
   Todo = 'Todo',
 }
 
+interface Config {
+  task_custom_fields?: ReadonlyArray<string>;
+}
+
 export class Tasks extends AsanaConverter {
+  private config: Config = undefined;
+
+  private initialize(ctx?: StreamContext): void {
+    this.config =
+      this.config ?? ctx?.config.source_specific_configs?.asana ?? {};
+  }
+
   readonly destinationModels: ReadonlyArray<DestinationModel> = [
     'tms_Task',
-    'tms_Project',
-    'tms_TaskProjectRelationship',
-    'tms_TaskBoard',
-    'tms_TaskBoardRelationship',
     'tms_TaskDependency',
     'tms_TaskAssignment',
-    'tms_Label',
     'tms_TaskTag',
   ];
 
+  static readonly tagsStream = new StreamName('asana', 'tags');
+
+  override get dependencies(): ReadonlyArray<StreamName> {
+    return [Tasks.tagsStream];
+  }
+
   async convert(
-    record: AirbyteRecord
+    record: AirbyteRecord,
+    ctx?: StreamContext
   ): Promise<ReadonlyArray<DestinationRecord>> {
+    this.initialize(ctx);
+
     const res: DestinationRecord[] = [];
 
     const source = this.streamName.source;
     const task = record.record.data;
 
     const taskKey = {uid: task.gid, source};
-    const status = this.findFieldByName(task.custom_fields, 'status');
     const parent = task.parent ? {uid: task.parent.gid, source} : null;
-    const priority = this.findFieldByName(task.custom_fields, 'priority');
-    const points = this.findFieldByName(task.custom_fields, 'points');
+
+    const taskCustomFields = (task.custom_fields ?? []).filter((f) =>
+      this.config.task_custom_fields?.includes(f.gid)
+    );
+
+    const statusChangelog: TmsTaskStatusChange[] = [];
+
+    for (const story of task.stories ?? []) {
+      statusChangelog.push({
+        changedAt: story.created_at,
+        status: Utils.toCategoryDetail(
+          Tms_TaskStatusCategory,
+          story.resource_subtype,
+          {
+            marked_complete: Tms_TaskStatusCategory.Done,
+            marked_incomplete: Tms_TaskStatusCategory.Todo,
+            assigned: Tms_TaskStatusCategory.InProgress,
+            unassigned: Tms_TaskStatusCategory.Todo,
+            marked_duplicate: Tms_TaskStatusCategory.Done,
+            unmarked_duplicate: Tms_TaskStatusCategory.Todo,
+          }
+        ),
+      });
+    }
+
+    const additionalFields = taskCustomFields.map((f) => this.toTaskField(f));
+
+    for (const membership of task.memberships ?? []) {
+      if (membership.section) {
+        additionalFields.push({
+          name: 'section_gid',
+          value: membership.section.gid,
+        });
+        additionalFields.push({
+          name: 'section_name',
+          value: membership.section.name,
+        });
+      }
+    }
 
     res.push({
       model: 'tms_Task',
       record: {
         ...taskKey,
         name: task.name,
-        description: task.notes?.substring(
-          0,
+        description: Utils.cleanAndTruncate(
+          task.notes,
           AsanaCommon.MAX_DESCRIPTION_LENGTH
         ),
         url: task.permalink_url ?? null,
         type: AsanaCommon.toTmsTaskType(task.resource_type),
-        priority: typeof priority === 'string' ? priority : null,
-        status:
-          typeof status === 'string' ? this.toTmsTaskStatus(status) : null,
-        points: typeof points === 'number' ? points : null,
-        additionalFields: task.custom_fields.map((f) => this.toTaskField(f)),
+        status: this.getStatus(task),
+        additionalFields,
         createdAt: Utils.toDate(task.created_at),
         updatedAt: Utils.toDate(task.modified_at),
         statusChangedAt: Utils.toDate(task.modified_at),
         parent,
-        creator: task.assignee ? {uid: task.assignee, source} : null,
+        statusChangelog: statusChangelog ?? null,
+        resolvedAt: Utils.toDate(task.completed_at),
       },
     });
-
-    for (const membership of task.memberships) {
-      if (membership.project) {
-        res.push({
-          model: 'tms_Project',
-          record: {
-            uid: membership.project.gid,
-            name: membership.project.name,
-            source,
-          },
-        });
-        res.push({
-          model: 'tms_TaskProjectRelationship',
-          record: {
-            task: taskKey,
-            project: {uid: membership.project.gid, source},
-          },
-        });
-      }
-
-      if (membership.section) {
-        res.push(
-          ...this.tms_TaskBoardRelationship(
-            taskKey.uid,
-            membership.section,
-            source
-          )
-        );
-      }
-    }
 
     if (task.assignee) {
       res.push({
         model: 'tms_TaskAssignment',
         record: {
           task: taskKey,
-          assignee: {uid: task.assignee, source},
+          assignee: {uid: task.assignee.gid, source},
         },
       });
     }
+
     if (parent) {
       res.push({
         model: 'tms_TaskDependency',
         record: {
-          dependentTask: taskKey,
+          dependentTask: parent,
           blocking: false,
-          fulfillingTask: parent,
+          fulfillingTask: taskKey,
         },
       });
     }
-    if (task.assignee_section) {
-      res.push(
-        ...this.tms_TaskBoardRelationship(
-          taskKey.uid,
-          task.assignee_section,
-          source
-        )
-      );
-    }
 
-    for (const tag of task.tags) {
+    for (const tag of task.tags ?? []) {
       if (tag.gid) {
-        const label = {name: tag.name};
-        res.push({
-          model: 'tms_Label',
-          record: {name: label.name},
-        });
+        const tagRec = ctx?.get(Tasks.tagsStream.asString, tag.gid);
+        if (!tagRec) {
+          continue;
+        }
+
+        const label = {name: tagRec.record.data.name};
+
         res.push({
           model: 'tms_TaskTag',
           record: {
-            label: {name: label.name},
+            label,
             task: taskKey,
           },
         });
@@ -160,21 +184,14 @@ export class Tasks extends AsanaConverter {
     return res;
   }
 
-  private tms_TaskBoardRelationship(
-    taskId: string,
-    section: AsanaSection,
-    source: string
-  ): DestinationRecord[] {
-    const res = [];
-    res.push(AsanaCommon.tms_TaskBoard(section, source));
-    res.push({
-      model: 'tms_TaskBoardRelationship',
-      record: {
-        task: {uid: taskId, source},
-        board: {uid: section.gid, source},
-      },
-    });
-    return res;
+  private getStatus(task: Dictionary<any>): TmsTaskStatus | null {
+    if (task.completed) {
+      return {category: Tms_TaskStatusCategory.Done, detail: 'completed'};
+    } else {
+      // In Asana, tasks are incomplete by default.
+      // Users may or may not have a custom field for status.
+      return {category: Tms_TaskStatusCategory.Todo, detail: 'incomplete'};
+    }
   }
 
   private findFieldByName(
@@ -202,19 +219,5 @@ export class Tasks extends AsanaConverter {
         customField.multi_enum_values?.name ??
         customField.display_value,
     };
-  }
-
-  private toTmsTaskStatus(status: string): TmsTaskStatus {
-    const detail = status.toLowerCase();
-    switch (detail) {
-      case 'done':
-        return {category: Tms_TaskStatusCategory.Done, detail};
-      case 'inprogress':
-        return {category: Tms_TaskStatusCategory.InProgress, detail};
-      case 'todo':
-        return {category: Tms_TaskStatusCategory.Todo, detail};
-      default:
-        return {category: Tms_TaskStatusCategory.Custom, detail};
-    }
   }
 }

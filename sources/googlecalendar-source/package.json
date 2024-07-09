@@ -19,7 +19,7 @@
     "resources/"
   ],
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "main": "./lib",
   "scripts": {
@@ -46,15 +46,14 @@
     ],
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      ".d.ts",
-      ".js"
-    ],
     "testTimeout": 10000,
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "test/tsconfig.json"
-      }
+    "transform": {
+      "\\.[jt]sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "test/tsconfig.json"
+        }
+      ]
     }
   }
 }

@@ -1,4 +1,4 @@
-import Client, {Schema} from '@atlassian/bitbucket-server';
+import Client, {ResponseError, Schema} from '@atlassian/bitbucket-server';
 import {AirbyteConfig, AirbyteLogger, wrapApiError} from 'faros-airbyte-cdk';
 import {
   Commit,
@@ -8,7 +8,10 @@ import {
   PullRequestActivity,
   PullRequestDiff,
   Repository,
+  Tag,
+  User,
 } from 'faros-airbyte-common/bitbucket-server';
+import {bucket} from 'faros-airbyte-common/common';
 import {pick} from 'lodash';
 import parseDiff from 'parse-diff';
 import {AsyncOrSync} from 'ts-essentials';
@@ -19,6 +22,7 @@ import {
   MoreEndpointMethodsPlugin,
   Prefix as MEP,
 } from './more-endpoint-methods';
+import {ProjectRepoFilter} from './project-repo-filter';
 
 export interface BitbucketServerConfig extends AirbyteConfig {
   readonly server_url?: string;
@@ -30,8 +34,11 @@ export interface BitbucketServerConfig extends AirbyteConfig {
   readonly page_size?: number;
   readonly cutoff_days?: number;
   readonly reject_unauthorized?: boolean;
+  readonly repo_bucket_id?: number;
+  readonly repo_bucket_total?: number;
 }
 
+const DEFAULT_CUTOFF_DAYS = 90;
 const DEFAULT_PAGE_SIZE = 25;
 
 type Dict = {[k: string]: any};
@@ -41,6 +48,15 @@ type ExtendedClient = Client & {
   [MEP]: any; // MEP: MoreEndpointsPrefix
 };
 
+interface PaginatedProjects extends Dict {
+  isLastPage?: boolean;
+  limit?: number;
+  size?: number;
+  start?: number;
+  values?: Project[];
+  [k: string]: any;
+}
+
 export class BitbucketServer {
   private static bitbucket: BitbucketServer = null;
 
@@ -48,7 +64,9 @@ export class BitbucketServer {
     private readonly client: ExtendedClient,
     private readonly pageSize: number,
     private readonly logger: AirbyteLogger,
-    readonly startDate: Date
+    private readonly startDate: Date,
+    private readonly repoBucketId: number,
+    private readonly repoBucketTotal: number
   ) {}
 
   static instance(
@@ -77,10 +95,19 @@ export class BitbucketServer {
       : {type: 'basic', username: config.username, password: config.password};
     client.authenticate(auth as Client.Auth);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - config.cutoff_days);
+    startDate.setDate(
+      startDate.getDate() - (config.cutoff_days ?? DEFAULT_CUTOFF_DAYS)
+    );
     const pageSize = config.page_size ?? DEFAULT_PAGE_SIZE;
 
-    const bb = new BitbucketServer(client, pageSize, logger, startDate);
+    const bb = new BitbucketServer(
+      client,
+      pageSize,
+      logger,
+      startDate,
+      config.repo_bucket_id ?? 1,
+      config.repo_bucket_total ?? 1
+    );
     BitbucketServer.bitbucket = bb;
     logger.debug(`Created Bitbucket Server instance with ${auth.type} auth`);
     return BitbucketServer.bitbucket;
@@ -103,11 +130,13 @@ export class BitbucketServer {
           'Bitbucket access token OR a Bitbucket username and password',
       ];
     }
-    if (!config.projects || config.projects.length < 1) {
-      return [false, 'No projects provided'];
+    const repoBucketTotal = config.repo_bucket_total ?? 1;
+    if (repoBucketTotal < 1) {
+      return [false, 'repo_bucket_total must be a positive integer'];
     }
-    if (!config.cutoff_days) {
-      throw new VError('cutoff_days is null or empty');
+    const repoBucketId = config.repo_bucket_id ?? 1;
+    if (repoBucketId < 1 || repoBucketId > repoBucketTotal) {
+      return [false, `repo_bucket_id must be between 1 and ${repoBucketTotal}`];
     }
     return [true, undefined];
   }
@@ -173,6 +202,7 @@ export class BitbucketServer {
             start,
             since: lastCommitId,
             limit: this.pageSize,
+            ignoreMissing: true,
           } as Client.Params.ReposGetCommits),
         (data) => {
           return {
@@ -189,9 +219,43 @@ export class BitbucketServer {
         }
       );
     } catch (err) {
+      const innerErr = innerError(err);
+      if (innerErr.message === 'No default branch is defined') {
+        this.logger.warn(
+          `No default branch is defined for repository ${fullName}. Please set one to enable fetching commits.`
+        );
+      } else {
+        throw new VError(
+          innerErr,
+          `Error fetching commits for repository ${fullName}`
+        );
+      }
+    }
+  }
+
+  async *tags(projectKey: string, repositorySlug: string): AsyncGenerator<Tag> {
+    const fullName = repoFullName(projectKey, repositorySlug);
+    try {
+      this.logger.debug(`Fetching tags for repository ${fullName}`);
+      yield* this.paginate<Dict, Tag>(
+        (start) =>
+          this.client[MEP].repos.getTags({
+            projectKey,
+            repositorySlug,
+            start,
+            limit: this.pageSize,
+          }),
+        (data) => {
+          return {
+            ...data,
+            computedProperties: {repository: {fullName}},
+          } as Tag;
+        }
+      );
+    } catch (err) {
       throw new VError(
         innerError(err),
-        `Error fetching commits for repository ${fullName}`
+        `Error fetching tags for repository ${fullName}`
       );
     }
   }
@@ -267,12 +331,12 @@ export class BitbucketServer {
         lastPRUpdatedDate
       );
       for (const pr of await prs) {
-        const {data} = await this.client[MEP].pullRequests.getDiff({
-          projectKey,
-          repositorySlug,
-          pullRequestId: pr.id,
-        });
         try {
+          const {data} = await this.client[MEP].pullRequests.getDiff({
+            projectKey,
+            repositorySlug,
+            pullRequestId: pr.id,
+          });
           yield {
             files: parseDiff(data).map((f) =>
               pick(f, 'deletions', 'additions', 'from', 'to', 'deleted', 'new')
@@ -346,10 +410,17 @@ export class BitbucketServer {
       }
       return results;
     } catch (err) {
-      throw new VError(
-        innerError(err),
-        `Error fetching pull requests for repository ${fullName}`
-      );
+      const innerErr = innerError(err);
+      if (innerErr.message === 'No default branch is defined') {
+        this.logger.warn(
+          `No default branch is defined for repository ${fullName}. Please set one to enable fetching pull requests.`
+        );
+      } else {
+        throw new VError(
+          innerErr,
+          `Error fetching pull requests for repository ${fullName}`
+        );
+      }
     }
   }
 
@@ -359,7 +430,7 @@ export class BitbucketServer {
   )
   async repositories(
     projectKey: string,
-    include?: ReadonlyArray<string>
+    projectRepoFilter?: ProjectRepoFilter
   ): Promise<ReadonlyArray<Repository>> {
     try {
       this.logger.debug(`Fetching repositories for project ${projectKey}`);
@@ -394,9 +465,16 @@ export class BitbucketServer {
           } as Repository;
         },
         (repo) => {
+          const repoFullName = repo.computedProperties.fullName;
           return {
             shouldEmit:
-              !include || include.includes(repo.computedProperties.fullName),
+              (!projectRepoFilter ||
+                projectRepoFilter.isIncluded(repoFullName)) &&
+              bucket(
+                'farosai/airbyte-bitbucket-server-source',
+                repoFullName,
+                this.repoBucketTotal
+              ) === this.repoBucketId,
             shouldBreakEarly: false,
           };
         }
@@ -413,6 +491,7 @@ export class BitbucketServer {
     }
   }
 
+  @Memoize()
   async project(projectKey: string): Promise<Project> {
     try {
       const {data} = await this.client[MEP].projects.getProject({projectKey});
@@ -422,9 +501,76 @@ export class BitbucketServer {
     }
   }
 
-  async *projectUsers(project: string): AsyncGenerator<ProjectUser> {
+  @Memoize()
+  async projects(
+    projects?: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<Project>> {
+    const lowercaseProjectKeys = projects?.map((p) => p.toLowerCase());
     try {
-      this.logger.debug(`Fetching users for project ${project}`);
+      this.logger.debug(`Fetching projects`);
+      const results = [];
+      const iterator = this.paginate<PaginatedProjects, Project>(
+        (start) =>
+          this.client[MEP].projects.getProjects({
+            start,
+            limit: this.pageSize,
+          }),
+        (data): Project => {
+          return data as Project;
+        },
+        (project) => {
+          return {
+            shouldEmit:
+              !projects ||
+              projects.length === 0 ||
+              lowercaseProjectKeys.includes(project.key?.toLowerCase()),
+            shouldBreakEarly: false,
+          };
+        }
+      );
+      for await (const project of iterator) {
+        results.push(project);
+      }
+      return results;
+    } catch (err) {
+      throw new VError(innerError(err), `Error fetching projects`);
+    }
+  }
+
+  async *projectUsers(projectKey: string): AsyncGenerator<ProjectUser> {
+    try {
+      this.logger.debug(`Fetching users for project ${projectKey}`);
+      yield* this.paginate<Schema.PaginatedUsers, ProjectUser>(
+        (start) =>
+          this.client[MEP].projects.getUsers({
+            start,
+            limit: this.pageSize,
+            projectKey,
+          }),
+        (data: Schema.User): ProjectUser => {
+          return {user: data.user, project: {key: projectKey}} as ProjectUser;
+        }
+      );
+    } catch (err) {
+      if ((err as ResponseError).code === 401) {
+        this.logger.warn(
+          `Received 401 code fetching users for project ${projectKey}, falling back to global search`
+        );
+        yield* this.searchUsersByProject(projectKey);
+      } else {
+        throw new VError(
+          innerError(err),
+          `Error fetching users for project ${projectKey}`
+        );
+      }
+    }
+  }
+
+  private async *searchUsersByProject(
+    projectKey: string
+  ): AsyncGenerator<ProjectUser> {
+    try {
+      this.logger.debug(`Searching users by project ${projectKey}`);
       yield* this.paginate<Schema.PaginatedUsers, ProjectUser>(
         (start) =>
           this.client.api.getUsers({
@@ -432,27 +578,42 @@ export class BitbucketServer {
             limit: this.pageSize,
             q: {
               'permission.1': 'PROJECT_READ',
-              'permission.1.projectKey': project,
+              'permission.1.projectKey': projectKey,
             },
           }),
         (data: Schema.User): ProjectUser => {
-          return {
-            user: data,
-            project: {key: project},
-          } as ProjectUser;
+          return {user: data, project: {key: projectKey}} as ProjectUser;
         }
       );
     } catch (err) {
       throw new VError(
         innerError(err),
-        `Error fetching users for project ${project}`
+        `Error searching for users by project ${projectKey}`
       );
+    }
+  }
+
+  async *users(): AsyncGenerator<User> {
+    try {
+      this.logger.debug(`Fetching users`);
+      yield* this.paginate<Schema.PaginatedUsers, User>(
+        (start) =>
+          this.client.api.getUsers({
+            start,
+            limit: this.pageSize,
+          }),
+        (data) => {
+          return data as User;
+        }
+      );
+    } catch (err) {
+      throw new VError(innerError(err), `Error fetching users`);
     }
   }
 }
 
 function repoFullName(projectKey: string, repoSlug: string): string {
-  return `${projectKey}/${repoSlug}`;
+  return `${projectKey}/${repoSlug}`.toLowerCase();
 }
 
 function innerError(err: any): VError {

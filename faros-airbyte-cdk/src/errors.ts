@@ -39,11 +39,12 @@ export function wrapApiError(error: Error, message?: string): Error {
   }
 
   const prefix = message ? `${message}: ` : '';
-  const res = error.response;
+  const res: AxiosResponse<any, any> | undefined = error.response;
   const info = {
-    req: error.request
-      ? formatRequest({...error.config, ...error.request})
-      : formatRequest(error.config),
+    req:
+      error.config || error.request
+        ? formatRequest({...error.config, ...error.request})
+        : undefined,
     res: res ? formatResponse(res) : undefined,
   };
   if (!res) {
@@ -61,4 +62,14 @@ export function wrapApiError(error: Error, message?: string): Error {
     msg += `: ${causeMsg}`;
   }
   return new VError({info}, msg);
+}
+
+// Used to notify the destination of an error without failing the sync
+export class NonFatalError extends VError {
+  constructor(message: string, info = {}, cause?: Error) {
+    super(
+      {name: 'NonFatalError', cause, info: {...info, fatal: false}},
+      message
+    );
+  }
 }

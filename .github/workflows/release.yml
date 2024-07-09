@@ -16,23 +16,30 @@ jobs:
       HUSKY: 0
     steps:
       - name: Check out
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: 16
+          node-version: 18.x
           registry-url: https://registry.npmjs.org
 
       - name: Extract tag version
         id: extract-tag-version
+        env:
+          RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
+          echo "GITHUB_REF is ${GITHUB_REF}"
+          echo "RELEASE_TAG_NAME is ${RELEASE_TAG_NAME}"
           TAG="${GITHUB_REF:10}"
+          if [ -z "$TAG" ]; then
+            TAG="${RELEASE_TAG_NAME}"
+          fi
           TAG_VERSION="${TAG//v/}"
           echo "TAG_VERSION=$TAG_VERSION" >> $GITHUB_ENV
 
       - name: Install dependencies
-        run: npm install -g lerna && lerna bootstrap --hoist
+        run: npm install -g lerna @lerna/legacy-package-management && lerna bootstrap --hoist
 
       - name: Publish Airbyte CDK package
         run: |
@@ -69,7 +76,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Extract tag version
         id: extract-tag-version
@@ -79,7 +86,7 @@ jobs:
           echo "TAG_VERSION=$TAG_VERSION" >> $GITHUB_ENV
 
       - name: Docker login
-        uses: docker/login-action@v2.0.0
+        uses: docker/login-action@v3.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

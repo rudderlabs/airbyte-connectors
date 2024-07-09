@@ -1,13 +1,10 @@
-import {AirbyteLog, AirbyteLogLevel} from 'faros-airbyte-cdk';
-import _ from 'lodash';
 import {getLocal} from 'mockttp';
 
-import {CLI, read} from '../cli';
-import {initMockttp, tempConfig, testLogger} from '../testing-tools';
+import {initMockttp, tempConfig} from '../testing-tools';
 import {googlecalendarAllStreamsLog} from './data';
+import {destinationWriteTest} from './utils';
 
 describe('googlecalendar', () => {
-  const logger = testLogger();
   const mockttp = getLocal({debug: false, recordTraffic: false});
   const catalogPath = 'test/resources/googlecalendar/catalog.json';
   let configPath: string;
@@ -19,7 +16,6 @@ describe('googlecalendar', () => {
         uid: '419 University Ave, Palo Alto, CA 94301',
         raw: '419 University Ave, Palo Alto, CA 94301',
         address: {
-          // eslint-disable-next-line max-len
           uid: 'EjI0MjAgVW5pdmVyc2l0eSBBdmUgIzMzM2EsIFBhbG8gQWx0bywgQ0EgOTQzMDEsIFVTQSIgGh4KFgoUChIJJy30Azm7j4ARbLmzlBtnYb8SBDMzM2E',
           fullAddress: '420 University Ave #333a, Palo Alto, CA 94301, USA',
           street: 'University Avenue',
@@ -40,7 +36,7 @@ describe('googlecalendar', () => {
     mockttp
       .forPost('/geocoding/lookup')
       .thenReply(200, JSON.stringify({locations: locationsRes}));
-    configPath = await tempConfig(mockttp.url);
+    configPath = await tempConfig({api_url: mockttp.url});
   });
 
   afterEach(async () => {
@@ -48,60 +44,10 @@ describe('googlecalendar', () => {
   });
 
   test('process records from all streams', async () => {
-    const cli = await CLI.runWith([
-      'write',
-      '--config',
+    await destinationWriteTest({
       configPath,
-      '--catalog',
-      catalogPath,
-      '--dry-run',
-    ]);
-    cli.stdin.end(googlecalendarAllStreamsLog, 'utf8');
-
-    const stdout = await read(cli.stdout);
-    logger.debug(stdout);
-
-    const processedByStream = {calendars: 1, events: 3};
-    const processed = _(processedByStream)
-      .toPairs()
-      .map((v) => [`${streamNamePrefix}${v[0]}`, v[1]])
-      .orderBy(0, 'asc')
-      .fromPairs()
-      .value();
-
-    const writtenByModel = {
-      cal_Calendar: 1,
-      cal_Event: 3,
-      cal_EventGuestAssociation: 2,
-      cal_User: 2,
-      geo_Address: 2,
-      geo_Coordinates: 2,
-      geo_Location: 2,
-    };
-
-    const processedTotal = _(processedByStream).values().sum();
-    const writtenTotal = _(writtenByModel).values().sum();
-    expect(stdout).toMatch(`Processed ${processedTotal} records`);
-    expect(stdout).toMatch(`Would write ${writtenTotal} records`);
-    expect(stdout).toMatch('Errored 0 records');
-    expect(stdout).toMatch('Skipped 0 records');
-    expect(stdout).toMatch(
-      JSON.stringify(
-        AirbyteLog.make(
-          AirbyteLogLevel.INFO,
-          `Processed records by stream: ${JSON.stringify(processed)}`
-        )
-      )
-    );
-    expect(stdout).toMatch(
-      JSON.stringify(
-        AirbyteLog.make(
-          AirbyteLogLevel.INFO,
-          `Would write records by model: ${JSON.stringify(writtenByModel)}`
-        )
-      )
-    );
-    expect(await read(cli.stderr)).toBe('');
-    expect(await cli.wait()).toBe(0);
+      catalogPath: 'test/resources/googlecalendar/catalog.json',
+      inputRecordsPath: 'googlecalendar/all-streams.log',
+    });
   });
 });

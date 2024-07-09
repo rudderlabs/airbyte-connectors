@@ -51,7 +51,7 @@ export class BambooHR {
     const httpClient = axios.create({
       baseURL: `https://${config.api_key}:x@api.bamboohr.com/api/gateway.php/${config.domain}/${version}`,
       timeout: 10000, // default is `0` (no timeout)
-      maxContentLength: 500000,
+      maxContentLength: Infinity,
       headers: {
         Accept: `application/json`,
         'Content-Type': `application/json`,
@@ -121,7 +121,7 @@ export class BambooHR {
         }
       } else {
         this.logger.warn(
-          `Could not fetch info for employee id ${employeeId}: Employee not found`
+          `Could not fetch info for employee id ${employeeId}: employee not found`
         );
       }
     }

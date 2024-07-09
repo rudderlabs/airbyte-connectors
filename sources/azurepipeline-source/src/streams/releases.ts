@@ -28,19 +28,23 @@ export class Releases extends AirbyteStreamBase {
   getJsonSchema(): Dictionary<any, string> {
     return require('../../resources/schemas/releases.json');
   }
+
   get primaryKey(): StreamKey {
     return 'id';
   }
+
   get cursorField(): string | string[] {
     return 'createdOn';
   }
+
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const project of this.config.project_names) {
+    for (const project of this.config.projects) {
       yield {
         project,
       };
     }
   }
+
   async *readRecords(
     syncMode: SyncMode,
     cursorField?: string[],
@@ -51,9 +55,14 @@ export class Releases extends AirbyteStreamBase {
       syncMode === SyncMode.INCREMENTAL
         ? streamState?.lastCreatedOn
         : undefined;
-    const azurePipeline = AzurePipeline.instance(this.config);
-    yield* azurePipeline.getReleases(streamSlice.project, lastCreatedOn);
+    const azurePipeline = AzurePipeline.instance(this.config, this.logger);
+    yield* azurePipeline.getReleases(
+      streamSlice.project,
+      lastCreatedOn,
+      this.logger
+    );
   }
+
   getUpdatedState(
     currentStreamState: ReleaseState,
     latestRecord: Release

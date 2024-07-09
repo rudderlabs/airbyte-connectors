@@ -5,14 +5,14 @@ import {Dictionary} from 'ts-essentials';
 import {BitbucketServerConfig} from '../bitbucket-server';
 import {StreamBase} from './common';
 
-type StreamSlice = {project: string};
+type StreamSlice = {projectKey: string};
 
 export class ProjectUsers extends StreamBase {
   constructor(
     readonly config: BitbucketServerConfig,
     readonly logger: AirbyteLogger
   ) {
-    super(logger);
+    super(config, logger);
   }
 
   getJsonSchema(): Dictionary<any> {
@@ -24,8 +24,9 @@ export class ProjectUsers extends StreamBase {
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const project of this.config.projects) {
-      yield {project};
+    for await (const project of this.projects()) {
+      const projectKey = await this.fetchProjectKey(project.key);
+      yield {projectKey};
     }
   }
 
@@ -34,6 +35,6 @@ export class ProjectUsers extends StreamBase {
     cursorField?: string[],
     streamSlice?: StreamSlice
   ): AsyncGenerator<ProjectUser> {
-    yield* this.server.projectUsers(streamSlice.project);
+    yield* this.server.projectUsers(streamSlice.projectKey);
   }
 }

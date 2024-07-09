@@ -1,18 +1,19 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 
 import {Command} from 'commander';
+import fs from 'fs';
 import path from 'path';
 
 import {wrapApiError} from '../errors';
-import {helpTable, traverseObject} from '../help';
+import {buildArgs, buildJson, helpTable, traverseObject} from '../help';
 import {AirbyteLogger} from '../logger';
 import {AirbyteConfig, AirbyteSpec} from '../protocol';
-import {Runner} from '../runner';
+import {ConnectorVersion, Runner} from '../runner';
 import {PACKAGE_VERSION, redactConfig, withDefaults} from '../utils';
 import {AirbyteDestination} from './destination';
 
 export class AirbyteDestinationRunner<
-  Config extends AirbyteConfig
+  Config extends AirbyteConfig,
 > extends Runner {
   constructor(
     protected readonly logger: AirbyteLogger,
@@ -27,6 +28,7 @@ export class AirbyteDestinationRunner<
       .version('v' + PACKAGE_VERSION)
       .addCommand(this.specCommand())
       .addCommand(this.specPrettyCommand())
+      .addCommand(this.airbyteLocalCLIWizardCommand())
       .addCommand(this.checkCommand())
       .addCommand(this.writeCommand());
   }
@@ -74,7 +76,9 @@ export class AirbyteDestinationRunner<
       .action(
         async (opts: {config: string; catalog: string; dryRun: boolean}) => {
           const {catalog, spec, config} = await this.loadConfig(opts);
-          this.logger.info(`Config: ${redactConfig(config, spec)}`);
+          const redactedConfig = redactConfig(config, spec);
+          this.logger.info(`Destination version: ${ConnectorVersion}`);
+          this.logger.info(`Config: ${JSON.stringify(redactedConfig)}`);
           this.logger.info(`Catalog: ${JSON.stringify(catalog)}`);
 
           try {
@@ -82,6 +86,7 @@ export class AirbyteDestinationRunner<
 
             const iter = this.destination.write(
               config,
+              redactedConfig,
               catalog,
               process.stdin,
               opts.dryRun
@@ -109,7 +114,7 @@ export class AirbyteDestinationRunner<
       .command('spec-pretty')
       .description('pretty spec command')
       .action(async () => {
-        const spec = await this.destination.spec();
+        const spec = await this.destination.spec(false);
         const rows = traverseObject(
           spec.spec.connectionSpecification,
           [
@@ -125,6 +130,65 @@ export class AirbyteDestinationRunner<
         // (connectionSpecification) object
         rows.shift();
         console.log(helpTable(rows));
+      });
+  }
+
+  airbyteLocalCLIWizardCommand(): Command {
+    return new Command()
+      .command('airbyte-local-cli-wizard')
+      .option(
+        '--json <path to json>',
+        'Output the destination configuration as JSON'
+      )
+      .option(
+        '--spec-file <path to spec>',
+        'Path to the spec file. If not provided, the spec will be fetched from the destination'
+      )
+      .option(
+        '--include-deprecated-fields',
+        'Include fields marked as deprecated in the spec',
+        false
+      )
+      .option(
+        '--include-hidden-fields',
+        'Include fields marked as hidden in the spec',
+        false
+      )
+      .option(
+        '--autofill',
+        'Automatically fill in the destination configuration with default/placeholder values',
+        false
+      )
+      .description(
+        'Run a wizard command to prepare arguments for Airbyte Local CLI'
+      )
+      .action(async (opts) => {
+        const spec = opts.specFile
+          ? JSON.parse(fs.readFileSync(opts.specFile, 'utf8'))
+          : await this.destination.spec(false);
+        const rows = traverseObject(
+          spec.spec.connectionSpecification,
+          opts.json
+            ? []
+            : [
+                // Prefix argument names with --dst
+                '--dst',
+              ],
+          // Assign section = 0 to the root object's row
+          0,
+          opts.includeDeprecatedFields,
+          opts.includeHiddenFields
+        );
+
+        if (opts.json) {
+          fs.writeFileSync(opts.json, await buildJson(rows, opts.autofill));
+        } else {
+          console.log(
+            '\n\nUse the arguments below when running this destination' +
+              ' with Airbyte Local CLI (https://github.com/faros-ai/airbyte-local-cli):' +
+              `\n\n${await buildArgs(rows, opts.autofill)}`
+          );
+        }
       });
   }
 

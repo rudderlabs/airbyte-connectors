@@ -1,22 +1,10 @@
-import {AxiosInstance} from 'axios';
-import {AirbyteLogger, AirbyteStreamBase, SyncMode} from 'faros-airbyte-cdk';
+import {SyncMode} from 'faros-airbyte-cdk';
 import {Dictionary} from 'ts-essentials';
 
-import {CircleCI, CircleCIConfig} from '../circleci/circleci';
-import {Project} from '../circleci/typings';
-type StreamSlice = {
-  repoName: string;
-};
+import {Project} from '../circleci/types';
+import {CircleCIStreamBase, StreamSlice} from './common';
 
-export class Projects extends AirbyteStreamBase {
-  constructor(
-    logger: AirbyteLogger,
-    private readonly config: CircleCIConfig,
-    private readonly axios?: AxiosInstance
-  ) {
-    super(logger);
-  }
-
+export class Projects extends CircleCIStreamBase {
   getJsonSchema(): Dictionary<any, string> {
     return require('../../resources/schemas/projects.json');
   }
@@ -26,10 +14,8 @@ export class Projects extends AirbyteStreamBase {
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const repoName of this.config.repo_names) {
-      yield {
-        repoName,
-      };
+    for (const projectSlug of this.cfg.project_slugs) {
+      yield {projectSlug};
     }
   }
 
@@ -38,7 +24,6 @@ export class Projects extends AirbyteStreamBase {
     cursorField?: string[],
     streamSlice?: StreamSlice
   ): AsyncGenerator<Project, any, unknown> {
-    const circleCI = CircleCI.instance(this.config, this.axios);
-    yield* circleCI.fetchProject(streamSlice.repoName);
+    yield await this.circleCI.fetchProject(streamSlice.projectSlug);
   }
 }

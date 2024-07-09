@@ -23,7 +23,7 @@
     },
     {
       "stream": {
-        "name": "incident_updates",
+        "name": "component_uptimes",
         "json_schema": {},
         "supported_sync_modes": [
           "full_refresh",
@@ -31,11 +31,14 @@
         ],
         "source_defined_cursor": true,
         "default_cursor_field": [
-          "updated_at"
+          "range_start"
         ],
         "source_defined_primary_key": [
           [
-            "id"
+            "id",
+            "page_id",
+            "range_start",
+            "range_end"
           ]
         ]
       },

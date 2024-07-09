@@ -1,24 +1,12 @@
-import {AxiosInstance} from 'axios';
-import {AirbyteLogger, AirbyteStreamBase, SyncMode} from 'faros-airbyte-cdk';
+import {SyncMode} from 'faros-airbyte-cdk';
 import {Dictionary} from 'ts-essentials';
 
-import {CircleCI, CircleCIConfig} from '../circleci/circleci';
-import {Pipeline} from '../circleci/typings';
-
-type StreamSlice = {
-  repoName: string;
-};
+import {Pipeline} from '../circleci/types';
+import {CircleCIStreamBase, StreamSlice} from './common';
 
 type PipelineState = Dictionary<{lastUpdatedAt?: string}>;
 
-export class Pipelines extends AirbyteStreamBase {
-  constructor(
-    logger: AirbyteLogger,
-    private readonly config: CircleCIConfig,
-    private readonly axios?: AxiosInstance
-  ) {
-    super(logger);
-  }
+export class Pipelines extends CircleCIStreamBase {
   getJsonSchema(): Dictionary<any, string> {
     return require('../../resources/schemas/pipelines.json');
   }
@@ -27,15 +15,13 @@ export class Pipelines extends AirbyteStreamBase {
     return 'id';
   }
 
-  get cursorField(): string {
-    return 'updated_at';
+  get cursorField(): string[] {
+    return ['computedProperties', 'updatedAt'];
   }
 
   async *streamSlices(): AsyncGenerator<StreamSlice> {
-    for (const repoName of this.config.repo_names) {
-      yield {
-        repoName,
-      };
+    for (const projectSlug of this.cfg.project_slugs) {
+      yield {projectSlug};
     }
   }
 
@@ -45,27 +31,27 @@ export class Pipelines extends AirbyteStreamBase {
     streamSlice?: StreamSlice,
     streamState?: PipelineState
   ): AsyncGenerator<Pipeline, any, unknown> {
-    const lastUpdatedAt =
+    const since =
       syncMode === SyncMode.INCREMENTAL
-        ? streamState?.[streamSlice.repoName]?.lastUpdatedAt
+        ? streamState?.[streamSlice.projectSlug]?.lastUpdatedAt
         : undefined;
-    const circleCI = CircleCI.instance(this.config, this.axios);
-    yield* circleCI.fetchPipelines(streamSlice.repoName, lastUpdatedAt);
+    yield* this.circleCI.fetchPipelines(streamSlice.projectSlug, since);
   }
+
   getUpdatedState(
     currentStreamState: PipelineState,
     latestRecord: Pipeline
   ): PipelineState {
-    const repoName = latestRecord.project_slug;
-    const repoState = currentStreamState[repoName] ?? {};
+    const projectSlug = latestRecord.project_slug;
+    const projectState = currentStreamState[projectSlug] ?? {};
 
-    const newRepoState = {
+    const newProjectState = {
       lastUpdatedAt:
-        new Date(latestRecord.updated_at) >
-        new Date(repoState.lastUpdatedAt ?? 0)
-          ? latestRecord.updated_at
-          : repoState.lastUpdatedAt,
+        new Date(latestRecord.computedProperties.updatedAt) >
+        new Date(projectState.lastUpdatedAt ?? 0)
+          ? latestRecord.computedProperties.updatedAt
+          : projectState.lastUpdatedAt,
     };
-    return {...currentStreamState, [repoName]: newRepoState};
+    return {...currentStreamState, [projectSlug]: newProjectState};
   }
 }
